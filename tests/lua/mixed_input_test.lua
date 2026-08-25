@@ -14,4 +14,8 @@ assert(spacing._add_commit_boundary("APP", "打开") == " APP")
 assert(spacing._add_commit_boundary("设置", "APP") == " 设置")
 assert(spacing._add_commit_boundary("继续", "打开") == "继续")
 
+local ascii_spacing = require("ascii_spacing_processor")
+assert(ascii_spacing._ends_with_cjk("打开"))
+assert(not ascii_spacing._ends_with_cjk("APP"))
+
 print("mixed_input_test: ok")

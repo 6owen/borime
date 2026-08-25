@@ -13,7 +13,8 @@ patch:
       states: [ 原样, 空格 ]
       reset: 1
 
-  "engine/processors/@before 3": lua_processor@*smart_enter
+  "engine/processors/@before 1": lua_processor@*ascii_spacing_processor
+  "engine/processors/@before 4": lua_processor@*smart_enter
   "engine/translators/+":
     - lua_translator@*mixed_input_translator
   "engine/filters/+":

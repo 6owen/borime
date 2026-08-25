@@ -333,7 +333,7 @@ sidecar 翻译的是 **Rime 产生的候选正文**，不是原始拼音，也�
 
 `mixed_input_translator.lua` 对连续输入做保守切分：中文前缀必须精确命中当前小鹤双拼词典，英文后缀必须精确命中 `melt_eng`。它优先使用最长中文前缀，因此 `dakdapp` 可产生 `打开 APP`；无法同时精确命中的输入不会生成混输候选。该功能由 `Control+Shift+M` 切换。
 
-`mixed_spacing_filter.lua` 在 CJK 字符和 ASCII 字母数字之间插入一个半角空格，同时参考 Rime 的上一条提交历史处理分两次上屏的 `打开` + `APP`。它不会读取宿主应用的全文或光标位置，所以移动光标、粘贴或从其他输入法切回后，历史边界只能作为启发式信息。该功能由 `Control+Shift+S` 切换。
+`mixed_spacing_filter.lua` 在 CJK 字符和 ASCII 字母数字之间插入一个半角空格，同时参考 Rime 的上一条提交历史处理分两次上屏的 `打开` + `APP`。`ascii_spacing_processor.lua` 位于 `ascii_composer` 之前，负责从中文直接切到 ASCII 模式后的首个空格。它们不会读取宿主应用的全文或光标位置，所以移动光标、粘贴或从其他输入法切回后，历史边界只能作为启发式信息。该功能由 `Control+Shift+S` 切换。
 
 ### 8.1 双语注释开关
 

@@ -1,0 +1,4 @@
+[submodule "vendor/rime-ice"]
+	path = vendor/rime-ice
+	url = https://github.com/iDvel/rime-ice.git
+	branch = main

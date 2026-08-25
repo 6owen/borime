@@ -1,0 +1,86 @@
+# Small offline starter set. Run `pnpm seed -- --count 2000` after adding a DeepSeek key.
+你好	hello
+您好	hello
+谢谢	thank you
+谢谢你	thank you
+不客气	you're welcome
+对不起	sorry
+没关系	it's okay
+请问	excuse me
+再见	goodbye
+早上好	good morning
+下午好	good afternoon
+晚上好	good evening
+晚安	good night
+好的	okay
+可以	sure
+不可以	no
+没问题	no problem
+为什么	why
+怎么样	how is it
+怎么办	what should I do
+什么时候	when
+在哪里	where
+等一下	wait a moment
+稍等一下	please wait a moment
+我知道	I know
+我不知道	I don't know
+我明白	I understand
+我不明白	I don't understand
+我觉得	I think
+我认为	I believe
+我希望	I hope
+我想要	I want
+我需要	I need
+我喜欢	I like
+我不喜欢	I don't like
+我同意	I agree
+我不同意	I disagree
+我的名字	my name
+我的帽子	my hat
+我的手机	my phone
+我的电脑	my computer
+我的朋友	my friend
+我的家人	my family
+今天	today
+明天	tomorrow
+昨天	yesterday
+现在	now
+以后	later
+马上	right away
+已经	already
+还没有	not yet
+可能	maybe
+当然	of course
+真的	really
+非常好	very good
+太好了	that's great
+很好	very good
+不好	not good
+没事	it's okay
+小心	be careful
+加油	keep it up
+恭喜	congratulations
+欢迎	welcome
+请进	come in
+请坐	have a seat
+请稍等	please wait
+帮帮我	help me
+你好吗	how are you
+我很好	I'm fine
+你是谁	who are you
+这是什么	what is this
+我爱你	I love you
+想你了	I miss you
+回头见	see you later
+明天见	see you tomorrow
+路上小心	travel safely
+祝你好运	good luck
+生日快乐	happy birthday
+新年快乐	happy New Year
+工作顺利	good luck with work
+学习英语	learn English
+输入法	input method
+中文	Chinese
+英文	English
+翻译	translation

@@ -1,0 +1,30 @@
+# Rime schema patch: bilingual Chinese-English candidates
+# Control+Shift+B toggles between 中文 and 中英 for the current session.
+
+patch:
+  "switches/+":
+    - name: bilingual_output
+      states: [ 中文, 中英 ]
+      reset: 1
+    - name: mixed_input
+      states: [ 单语, 混输 ]
+      reset: 1
+    - name: auto_spacing
+      states: [ 原样, 空格 ]
+      reset: 1
+
+  "engine/processors/@before 3": lua_processor@*smart_enter
+  "engine/translators/+":
+    - lua_translator@*mixed_input_translator
+  "engine/filters/+":
+    - lua_filter@*bilingual_filter
+    - lua_filter@*mixed_spacing_filter
+
+  "key_binder/bindings/+":
+    - { when: always, accept: Control+Shift+b, toggle: bilingual_output }
+    - { when: always, accept: Control+Shift+m, toggle: mixed_input }
+    - { when: always, accept: Control+Shift+s, toggle: auto_spacing }
+
+  bilingual/max_candidates: 5
+  bilingual/max_comment_length: 42
+  mixed_input/max_candidates: 3

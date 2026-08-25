@@ -1,6 +1,7 @@
 import { access, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { getConfig } from './config.js';
+import { findWeaselDeployer, squirrelExecutable } from './platform.js';
 import {
   loadTranslationMap,
   parseTranslationTsv,
@@ -44,7 +45,12 @@ async function main(): Promise<void> {
     readText(config.failurePath),
   ]);
   console.log(`Rime directory: ${config.rimeDirectory}`);
-  console.log(`Squirrel installed: ${await exists('/Library/Input Methods/Squirrel.app')}`);
+  const frontend = process.platform === 'darwin'
+    ? `Squirrel (${await exists(squirrelExecutable) ? 'installed' : 'missing'})`
+    : process.platform === 'win32'
+      ? `Weasel (${(await findWeaselDeployer()) ? 'installed' : 'missing'})`
+      : `Rime frontend (${process.platform})`;
+  console.log(`Rime frontend: ${frontend}`);
   console.log(`Flypy schema installed: ${await exists(join(config.rimeDirectory, 'double_pinyin_flypy.schema.yaml'))}`);
   console.log(`Bilingual patch installed: ${await exists(join(config.rimeDirectory, 'lua', 'bilingual_filter.lua'))}`);
   console.log(`Translation API key configured: ${Boolean(config.apiKey)}`);

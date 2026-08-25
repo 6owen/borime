@@ -1,8 +1,9 @@
 import { existsSync } from 'node:fs';
-import { homedir, userInfo } from 'node:os';
+import { userInfo } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { loadEnvFile } from 'node:process';
 import { fileURLToPath } from 'node:url';
+import { resolveRimeDirectory } from './platform.js';
 
 const sourceDirectory = dirname(fileURLToPath(import.meta.url));
 
@@ -56,7 +57,7 @@ export interface AppConfig {
 
 export function getConfig(): AppConfig {
   reloadLocalEnv();
-  const rimeDirectory = join(homedir(), 'Library', 'Rime');
+  const rimeDirectory = resolveRimeDirectory();
   const dataDirectory =
     process.env.RIME_BILINGUAL_DATA_DIR ?? join(rimeDirectory, 'bilingual');
   const baseURL = process.env.OPENAI_BASE_URL;

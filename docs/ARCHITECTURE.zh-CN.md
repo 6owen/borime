@@ -7,7 +7,7 @@
 
 这不是一套从零实现的输入法，而是在成熟中文输入法链路旁边增加了一条异步英文注释链路：
 
-- 鼠须管（Squirrel）和 librime 负责把小鹤双拼编码变成中文候选，并学习你的中文选词习惯。
+- 鼠须管（Squirrel）或小狼毫（Weasel）中的 librime 负责把小鹤双拼编码变成中文候选，并学习你的中文选词习惯。
 - Lua filter 保持候选正文不变，只给候选的 `comment` 字段附加英文。
 - 本地词典负责大多数即时翻译。
 - 本地没有翻译时，Node.js sidecar 才通过 Vercel AI SDK 调用 DeepSeek，并把结果持久化为下一次可即时命中的缓存。
@@ -37,7 +37,7 @@
 
 ```mermaid
 flowchart LR
-  K[键盘输入] --> S[Squirrel / macOS IMK]
+  K[键盘输入] --> S[Squirrel / macOS<br/>Weasel / Windows]
   S --> R[librime + 小鹤双拼方案]
   D[雾凇静态词库] --> R
   U[Rime userdb] <--> R
@@ -47,7 +47,7 @@ flowchart LR
   L -->|本地命中| V[ShadowCandidate<br/>text=中文 / comment=英文]
   L -->|本地未命中| P[显示 AI 翻译中…]
   P --> Q[requests.txt 追加队列]
-  Q --> W[Node.js LaunchAgent sidecar]
+  Q --> W[Node.js sidecar<br/>LaunchAgent / Scheduled Task]
   W --> A[Vercel AI SDK]
   A --> M[DeepSeek / OpenAI-compatible API]
   M --> X[dynamic.tsv 原子写入]
@@ -60,8 +60,8 @@ flowchart LR
 
 架构上有三个进程边界：
 
-1. macOS 应用通过输入法框架与 Squirrel 交互。
-2. Squirrel 内部运行 librime 和 Lua，负责同步、低延迟的候选处理。
+1. 宿主应用通过系统输入法框架与 Squirrel 或 Weasel 交互。
+2. Rime 前端内部运行 librime 和 Lua，负责同步、低延迟的候选处理。
 3. 独立 Node.js 进程负责网络、模型调用与磁盘缓存。
 
 把网络隔离到 sidecar 是核心设计决策。输入法属于强交互、低延迟路径；即使 API 超时、限流或断网，中文输入也必须继续可用。
@@ -95,7 +95,8 @@ comment = AI · send one
 小鹤双拼首先是一套编码映射：它定义按键序列如何表达声母、韵母。它本身并不等于词库。
 
 雾凇拼音提供中文词条、读音、基础权重、语言模型和输入方案配置。当前项目把
-`vendor/rime-ice` 部署到 `~/Library/Rime`，并选择 `double_pinyin_flypy` 方案。
+`vendor/rime-ice` 部署到 Rime 用户目录，并选择 `double_pinyin_flypy` 方案。该目录在
+macOS 是 `~/Library/Rime`，在 Windows 是 `%APPDATA%\Rime`。
 
 可以把两者理解成：
 
@@ -110,7 +111,7 @@ Rime userdb：你本人通常选择哪个中文
 Rime 部署时会把 YAML 词典编译成适合查询的二进制结构，例如 `*.table.bin`、
 `*.prism.bin`。这些属于静态基线。
 
-实际使用中，Rime 还会在 `~/Library/Rime/<词典名>.userdb/` 保存用户词典。它记录使用习惯和用户词条，并参与候选质量计算。长期使用后，常选词会更符合个人习惯。
+实际使用中，Rime 还会在 Rime 用户目录下的 `<词典名>.userdb/` 保存用户词典。它记录使用习惯和用户词条，并参与候选质量计算。长期使用后，常选词会更符合个人习惯。
 
 这里不应把 userdb 简化成“一个纯计数器”。候选最终排序来自静态词频、语言模型、编码匹配、用户词典质量等多种信号。当前项目没有改写 librime 的排序算法，而是完整保留它的学习能力。
 
@@ -228,8 +229,9 @@ DeepSeek 完成：   dynamic.tsv 已有 send one
 
 ## 6. Node.js sidecar：异步慢路径
 
-sidecar 由 `src/worker.ts` 实现，通过 macOS LaunchAgent
-`com.local.rime-bilingual` 常驻运行。
+sidecar 由 `src/worker.ts` 实现：macOS 通过 LaunchAgent
+`com.local.rime-bilingual` 常驻运行，Windows 通过当前用户的计划任务
+`RimeBilingualIME` 在登录时启动。
 
 ### 6.1 为什么使用追加队列
 
@@ -383,6 +385,9 @@ rime-bilingual-ime/
 │   ├── default.custom.yaml                 # 全局按键、方案列表、页大小
 │   ├── double_pinyin_flypy.custom.yaml     # 双语开关和 Lua filter
 │   ├── lua/bilingual_filter.lua            # 候选增强与请求入队
+│   ├── lua/mixed_input_translator.lua       # 连续中文双拼 + 英文
+│   ├── lua/mixed_spacing_filter.lua         # 候选边界自动空格
+│   ├── lua/ascii_spacing_processor.lua      # ASCII 模式边界空格
 │   ├── lua/smart_enter.lua                 # 导航后 Return 确认候选
 │   └── bilingual/seed.tsv                  # 初始翻译覆盖层
 ├── src/
@@ -390,10 +395,13 @@ rime-bilingual-ime/
 │   ├── translator.ts                       # AI SDK + 结构化输出
 │   ├── worker.ts                           # 队列消费循环
 │   ├── store.ts                            # TSV、原子写、offset
+│   ├── platform.ts                         # Squirrel／Weasel 平台适配
 │   ├── import-cedict.ts                    # CC-CEDICT 导入
 │   ├── seed.ts                             # 高频词 AI 预生成
-│   ├── install-rime.ts                     # 部署与 LaunchAgent
+│   ├── install-rime.ts                     # 部署与后台任务注册
+│   ├── package-release.ts                   # 无隐私数据的 ZIP 打包
 │   └── status.ts                           # 状态摘要
+├── scripts/register-windows-task.ps1       # Windows 登录启动任务
 ├── .env                                    # 本机密钥；被 gitignore
 └── THIRD_PARTY_NOTICES.md                  # 第三方数据许可
 ```
@@ -401,7 +409,8 @@ rime-bilingual-ime/
 ### 9.2 运行时文件
 
 ```text
-~/Library/Rime/
+Rime 用户目录/                             # macOS: ~/Library/Rime
+                                           # Windows: %AppData%\Rime
 ├── build/                                  # Rime 部署后的编译产物
 ├── *.userdb/                               # Rime 中文选词学习结果
 ├── lua/bilingual_filter.lua                # 已部署 Lua
@@ -423,7 +432,7 @@ rime-bilingual-ime/
 所有命令都在项目目录执行：
 
 ```bash
-cd /Users/wangwenbo/Desktop/rime-bilingual-ime
+cd /path/to/rime-bilingual-ime
 ```
 
 ### 状态、测试与构建
@@ -439,14 +448,14 @@ pnpm build
 
 ```bash
 pnpm install:rime
-"/Library/Input Methods/Squirrel.app/Contents/MacOS/Squirrel" --reload
 ```
+
+命令会按当前平台自动注册 LaunchAgent 或 Windows 计划任务，并调用 Squirrel／Weasel 重新部署。
 
 ### 更新第三方中英词典
 
 ```bash
 pnpm import:cedict
-"/Library/Input Methods/Squirrel.app/Contents/MacOS/Squirrel" --reload
 ```
 
 ### 用 AI 预生成更多高频词翻译
@@ -462,10 +471,17 @@ tail -f ~/Library/Rime/bilingual/worker.log
 tail -f ~/Library/Rime/bilingual/worker.error.log
 ```
 
-### 检查 LaunchAgent
+### 检查后台服务
 
 ```bash
 launchctl print "gui/$(id -u)/com.local.rime-bilingual"
+```
+
+Windows 使用 PowerShell：
+
+```powershell
+Get-ScheduledTask -TaskName RimeBilingualIME
+Get-Content "$env:APPDATA\Rime\bilingual\worker.log" -Wait
 ```
 
 ## 11. 故障诊断
@@ -490,7 +506,7 @@ launchctl print "gui/$(id -u)/com.local.rime-bilingual"
 ```text
 候选是否有 AI 翻译中…
   ↓ 有：Lua 工作，继续查 sidecar
-LaunchAgent 是否 running
+LaunchAgent / Windows 计划任务是否 running
   ↓ 是：查 worker.error.log
 dynamic.tsv 是否出现中文词条
   ↓ 有：缓存已写，触发一次候选重算
@@ -512,7 +528,9 @@ dynamic.tsv 是否出现中文词条
 | `RIME_BILINGUAL_RETRY_BASE_MS` | 2000 | 指数退避的初始等待时间 |
 | `RIME_BILINGUAL_QUEUE_MAX_BYTES` | 1048576 | 已完全消费的请求队列压缩阈值 |
 | `RIME_BILINGUAL_LOG_MAX_BYTES` | 1048576 | 单个 worker／死信日志的轮转阈值 |
-| `RIME_BILINGUAL_DATA_DIR` | `~/Library/Rime/bilingual` | 运行时数据目录 |
+| `RIME_USER_DIR` | 平台默认 Rime 用户目录 | 覆盖整个 Rime 配置目录 |
+| `RIME_BILINGUAL_DATA_DIR` | `<Rime 用户目录>/bilingual` | 运行时数据目录 |
+| `RIME_DEPLOYER_PATH` | 自动探测 | Windows 的 `WeaselDeployer.exe` 完整路径 |
 
 候选显示数量由 `rime/double_pinyin_flypy.custom.yaml` 中的
 `bilingual/max_candidates` 控制。增加它会提高 UI 密度、队列写入量和潜在 API 成本。

@@ -1,15 +1,12 @@
-import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
-import { promisify } from 'node:util';
 import { getConfig } from './config.js';
+import { reloadRime, restartBackgroundWorker } from './platform.js';
 import {
   atomicWrite,
   bumpVersion,
   serializeTranslationTsv,
 } from './store.js';
-
-const execFileAsync = promisify(execFile);
 
 export const cedictSource =
   'https://raw.githubusercontent.com/qundao/backup-cc-cedict/main/cedict.txt';
@@ -74,15 +71,13 @@ export async function main(): Promise<void> {
   );
   await bumpVersion(config.versionPath);
 
-  const service = `gui/${config.uid}/com.local.rime-bilingual`;
-  await execFileAsync('launchctl', ['kickstart', '-k', service]).catch(() => undefined);
-  const squirrel = '/Library/Input Methods/Squirrel.app/Contents/MacOS/Squirrel';
+  await restartBackgroundWorker(config.uid);
   try {
-    await execFileAsync(squirrel, ['--reload']);
-    console.log('[rime-bilingual] reloaded Squirrel so the new dictionary is active');
+    const frontend = await reloadRime();
+    console.log(`[rime-bilingual] reloaded ${frontend} so the new dictionary is active`);
   } catch (error) {
     console.warn(
-      '[rime-bilingual] dictionary imported, but Squirrel could not be reloaded automatically:',
+      '[rime-bilingual] dictionary imported, but Rime could not be reloaded automatically:',
       error,
     );
   }

@@ -1,24 +1,31 @@
 {
   "name": "rime-bilingual-ime",
   "version": "1.0.0",
-  "description": "Rime/Squirrel bilingual candidate filter with a DeepSeek AI SDK sidecar",
+  "description": "Cross-platform Rime bilingual candidate filter with a DeepSeek AI SDK sidecar",
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run && pnpm test:lua",
+    "test": "pnpm test:ts && pnpm test:lua",
+    "test:ts": "vitest run",
     "test:lua": "luajit tests/lua/smart_enter_test.lua && luajit tests/lua/bilingual_filter_test.lua && luajit tests/lua/mixed_input_test.lua",
     "worker": "tsx src/worker.ts",
     "seed": "tsx src/seed.ts",
     "import:cedict": "tsx src/import-cedict.ts",
     "download:squirrel": "tsx src/download-squirrel.ts",
     "install:rime": "tsx src/install-rime.ts",
-    "status": "tsx src/status.ts"
+    "status": "tsx src/status.ts",
+    "cache:export": "tsx src/translation-cache.ts export",
+    "cache:import": "tsx src/translation-cache.ts import",
+    "package:release": "pnpm build && tsx src/package-release.ts"
   },
   "keywords": [],
   "author": "",
   "license": "MIT",
   "packageManager": "pnpm@10.13.1",
+  "engines": {
+    "node": ">=22"
+  },
   "dependencies": {
     "@ai-sdk/deepseek": "^3.0.32",
     "@ai-sdk/openai-compatible": "3.0.37",

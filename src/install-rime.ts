@@ -1,21 +1,119 @@
+import { execFile } from 'node:child_process';
 import {
   access,
   chmod,
   cp,
   mkdir,
-  readFile,
   readdir,
   writeFile,
 } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, join } from 'node:path';
-import { execFile } from 'node:child_process';
+import { basename, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { getConfig } from './config.js';
+import { type AppConfig, getConfig } from './config.js';
+import { reloadRime, windowsTaskName } from './platform.js';
 
 const execFileAsync = promisify(execFile);
 const sleep = (milliseconds: number) =>
   new Promise(resolve => setTimeout(resolve, milliseconds));
+
+async function exists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function directoryHasFiles(path: string): Promise<boolean> {
+  try {
+    return (await readdir(path)).length > 0;
+  } catch {
+    return false;
+  }
+}
+
+function xmlEscape(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
+}
+
+async function secureFile(path: string): Promise<void> {
+  if (process.platform !== 'win32') await chmod(path, 0o600).catch(() => undefined);
+}
+
+async function installRimeFiles(config: AppConfig): Promise<void> {
+  const sourceRime = join(config.projectRoot, 'vendor', 'rime-ice');
+  const integration = join(config.projectRoot, 'rime');
+  const marker = join(config.rimeDirectory, '.rime-bilingual-installed');
+  if (!(await exists(join(sourceRime, 'default.yaml')))) {
+    throw new Error(
+      'vendor/rime-ice is missing; clone with --recurse-submodules or run git submodule update --init',
+    );
+  }
+
+  const alreadyInstalled = await exists(marker);
+  if (!alreadyInstalled && (await directoryHasFiles(config.rimeDirectory))) {
+    const stamp = new Date().toISOString().replaceAll(':', '-').replaceAll('.', '-');
+    const backup = `${config.rimeDirectory}.backup-${stamp}`;
+    await cp(config.rimeDirectory, backup, { recursive: true, force: false });
+    console.log(`[rime-bilingual] backed up existing Rime data to ${backup}`);
+  }
+
+  await mkdir(config.rimeDirectory, { recursive: true });
+  await cp(sourceRime, config.rimeDirectory, {
+    recursive: true,
+    force: true,
+    filter: source => !source.includes(`${join('vendor', 'rime-ice', '.git')}`),
+  });
+  await cp(join(integration, 'lua'), join(config.rimeDirectory, 'lua'), {
+    recursive: true,
+    force: true,
+  });
+  for (const name of [
+    'double_pinyin_flypy.custom.yaml',
+    'default.custom.yaml',
+  ]) {
+    await cp(join(integration, name), join(config.rimeDirectory, name), {
+      force: true,
+    });
+  }
+
+  await mkdir(config.dataDirectory, { recursive: true });
+  await cp(join(integration, 'bilingual', 'seed.tsv'), config.seedPath, {
+    force: !alreadyInstalled,
+  });
+  for (const path of [
+    config.dynamicPath,
+    config.queuePath,
+    config.cursorPath,
+    config.failurePath,
+  ]) {
+    if (!(await exists(path))) {
+      await writeFile(path, path === config.cursorPath ? '0\n' : '', 'utf8');
+    }
+    await secureFile(path);
+  }
+  await writeFile(config.versionPath, `${Date.now()}\n`, {
+    encoding: 'utf8',
+    mode: 0o600,
+  });
+  for (const path of [
+    config.seedPath,
+    config.dictionaryPath,
+    config.versionPath,
+    config.workerLogPath,
+    config.workerErrorLogPath,
+    join(config.projectRoot, '.env'),
+  ]) {
+    await secureFile(path);
+  }
+  await writeFile(marker, `${config.projectRoot}\n`, 'utf8');
+}
 
 async function bootstrapLaunchAgent(
   service: string,
@@ -43,110 +141,17 @@ async function bootstrapLaunchAgent(
   throw lastError;
 }
 
-function xmlEscape(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;');
-}
-
-async function directoryHasFiles(path: string): Promise<boolean> {
-  try {
-    return (await readdir(path)).length > 0;
-  } catch {
-    return false;
-  }
-}
-
-async function isExecutable(path: string): Promise<boolean> {
-  try {
-    await access(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function main(): Promise<void> {
-  const config = getConfig();
-  const sourceRime = join(config.projectRoot, 'vendor', 'rime-ice');
-  const integration = join(config.projectRoot, 'rime');
-  const marker = join(config.rimeDirectory, '.rime-bilingual-installed');
-
-  let alreadyInstalled = false;
-  try {
-    await readFile(marker, 'utf8');
-    alreadyInstalled = true;
-  } catch {
-    alreadyInstalled = false;
-  }
-
-  if (!alreadyInstalled && (await directoryHasFiles(config.rimeDirectory))) {
-    const stamp = new Date().toISOString().replaceAll(':', '-').replaceAll('.', '-');
-    const backup = `${config.rimeDirectory}.backup-${stamp}`;
-    await cp(config.rimeDirectory, backup, { recursive: true, force: false });
-    console.log(`[rime-bilingual] backed up existing Rime data to ${backup}`);
-  }
-
-  await mkdir(config.rimeDirectory, { recursive: true });
-  await cp(sourceRime, config.rimeDirectory, {
-    recursive: true,
-    force: true,
-    filter: source => !source.includes(`${join('vendor', 'rime-ice', '.git')}`),
-  });
-  await cp(join(integration, 'lua'), join(config.rimeDirectory, 'lua'), {
-    recursive: true,
-    force: true,
-  });
-  await cp(
-    join(integration, 'double_pinyin_flypy.custom.yaml'),
-    join(config.rimeDirectory, 'double_pinyin_flypy.custom.yaml'),
-    { force: true },
-  );
-  await cp(
-    join(integration, 'default.custom.yaml'),
-    join(config.rimeDirectory, 'default.custom.yaml'),
-    { force: true },
-  );
-  await mkdir(config.dataDirectory, { recursive: true });
-  await cp(join(integration, 'bilingual', 'seed.tsv'), config.seedPath, {
-    force: !alreadyInstalled,
-  });
-  for (const path of [
-    config.dynamicPath,
-    config.queuePath,
-    config.cursorPath,
-    config.failurePath,
-  ]) {
-    try {
-      await readFile(path);
-    } catch {
-      await writeFile(path, path === config.cursorPath ? '0\n' : '', 'utf8');
-    }
-    await chmod(path, 0o600);
-  }
-  for (const path of [
-    config.seedPath,
-    config.dictionaryPath,
-    config.versionPath,
-    config.workerLogPath,
-    config.workerErrorLogPath,
-    join(config.projectRoot, '.env'),
-  ]) {
-    await chmod(path, 0o600).catch(() => undefined);
-  }
-  await writeFile(config.versionPath, `${Date.now()}\n`, {
-    encoding: 'utf8',
-    mode: 0o600,
-  });
-  await writeFile(marker, `${config.projectRoot}\n`, 'utf8');
-
+async function installMacBackgroundWorker(config: AppConfig): Promise<string> {
   const launchAgents = join(homedir(), 'Library', 'LaunchAgents');
   const plistPath = join(launchAgents, 'com.local.rime-bilingual.plist');
-  const stableHomebrewNode = '/opt/homebrew/bin/node';
-  const nodePath = (await isExecutable(stableHomebrewNode))
-    ? stableHomebrewNode
-    : process.execPath;
+  const candidates = ['/opt/homebrew/bin/node', '/usr/local/bin/node'];
+  let nodePath = process.execPath;
+  for (const candidate of candidates) {
+    if (await exists(candidate)) {
+      nodePath = candidate;
+      break;
+    }
+  }
   const plist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -178,13 +183,54 @@ async function main(): Promise<void> {
   await sleep(500);
   await bootstrapLaunchAgent(service, plistPath);
   await execFileAsync('launchctl', ['kickstart', '-k', service]);
-
-  console.log(`[rime-bilingual] installed Rime files in ${config.rimeDirectory}`);
-  console.log(`[rime-bilingual] LaunchAgent: ${basename(plistPath)}`);
-  console.log('[rime-bilingual] deploy Rime, then select 小鹤双拼 from the input menu');
+  return `LaunchAgent ${basename(plistPath)}`;
 }
 
-void main().catch(error => {
-  console.error('[rime-bilingual] installation failed:', error);
-  process.exitCode = 1;
-});
+async function installWindowsBackgroundWorker(config: AppConfig): Promise<string> {
+  const script = join(config.projectRoot, 'scripts', 'register-windows-task.ps1');
+  if (!(await exists(script))) throw new Error(`Windows task script is missing: ${script}`);
+  await execFileAsync('powershell.exe', [
+    '-NoProfile',
+    '-NonInteractive',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-File',
+    script,
+    '-NodePath',
+    process.execPath,
+    '-WorkerPath',
+    join(config.projectRoot, 'dist', 'worker.js'),
+    '-WorkingDirectory',
+    config.projectRoot,
+    '-TaskName',
+    windowsTaskName,
+  ]);
+  return `Scheduled Task ${windowsTaskName}`;
+}
+
+export async function main(): Promise<void> {
+  if (!['darwin', 'win32'].includes(process.platform)) {
+    throw new Error(`installer currently supports macOS and Windows, not ${process.platform}`);
+  }
+  const config = getConfig();
+  await installRimeFiles(config);
+  const background =
+    process.platform === 'darwin'
+      ? await installMacBackgroundWorker(config)
+      : await installWindowsBackgroundWorker(config);
+  const frontend = await reloadRime();
+
+  console.log(`[rime-bilingual] installed Rime files in ${config.rimeDirectory}`);
+  console.log(`[rime-bilingual] background worker: ${background}`);
+  console.log(`[rime-bilingual] deployed with ${frontend}; select 小鹤双拼`);
+}
+
+const isMain = process.argv[1]
+  ? resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+  : false;
+if (isMain) {
+  void main().catch(error => {
+    console.error('[rime-bilingual] installation failed:', error);
+    process.exitCode = 1;
+  });
+}

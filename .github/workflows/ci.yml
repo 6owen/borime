@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.13.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - run: pnpm test:ts
+      - if: runner.os == 'macOS'
+        run: brew install luajit
+      - if: runner.os == 'macOS'
+        run: pnpm test:lua
+      - if: runner.os == 'Windows'
+        shell: powershell
+        run: '[scriptblock]::Create((Get-Content -Raw scripts/register-windows-task.ps1)) | Out-Null'

@@ -50,6 +50,11 @@ type TranslationConfig = Pick<
   'apiKey' | 'baseURL' | 'model' | 'timeoutMs' | 'maxOutputTokens'
 >;
 
+export type TranslationProgress = (
+  source: string,
+  english: string,
+) => void | Promise<void>;
+
 async function translateCompatibleCandidate(
   text: string,
   config: TranslationConfig & { apiKey: string; baseURL: string },
@@ -87,6 +92,7 @@ export async function translateBatch(
   texts: string[],
   config: TranslationConfig,
   abortSignal?: AbortSignal,
+  onTranslation?: TranslationProgress,
 ): Promise<Map<string, string>> {
   if (!config.apiKey) throw new Error('Translation API key is not configured');
   if (texts.length === 0) return new Map();
@@ -98,9 +104,15 @@ export async function translateBatch(
       baseURL: config.baseURL,
     };
     const entries = await Promise.all(
-      texts.map(text =>
-        translateCompatibleCandidate(text, compatibleConfig, abortSignal),
-      ),
+      texts.map(async text => {
+        const entry = await translateCompatibleCandidate(
+          text,
+          compatibleConfig,
+          abortSignal,
+        );
+        await onTranslation?.(...entry);
+        return entry;
+      }),
     );
     return new Map(entries);
   }
@@ -130,7 +142,10 @@ export async function translateBatch(
   for (const item of output.translations) {
     const source = cleanCell(item.source);
     const english = normalizeTranslation(item.english);
-    if (requested.has(source) && english) result.set(source, english);
+    if (requested.has(source) && english) {
+      result.set(source, english);
+      await onTranslation?.(source, english);
+    }
   }
   return result;
 }

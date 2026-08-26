@@ -7,6 +7,18 @@ export interface PreemptionOptions {
   isSuperseded: () => boolean | Promise<boolean>;
 }
 
+export function isCacheRefreshContinuation(
+  latestTexts: readonly string[],
+  requestTexts: readonly string[],
+  known: ReadonlyMap<string, string>,
+): boolean {
+  const stillMissing = requestTexts.filter(text => !known.has(text));
+  return (
+    latestTexts.length === stillMissing.length &&
+    latestTexts.every((text, index) => text === stillMissing[index])
+  );
+}
+
 type OperationOutcome<T> =
   | { status: 'completed'; value: T }
   | { status: 'failed'; error: unknown };

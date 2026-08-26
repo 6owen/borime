@@ -189,4 +189,74 @@ describe('OpenAI-compatible translation', () => {
       await once(server, 'close');
     }
   });
+
+  it('reports a completed candidate without waiting for the slowest candidate', async () => {
+    const server = createServer(async (request, response) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) chunks.push(Buffer.from(chunk));
+      const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as {
+        messages?: Array<{ role?: string; content?: string }>;
+      };
+      const prompt = body.messages?.findLast(message => message.role === 'user')
+        ?.content ?? '';
+      const arrayStart = prompt.indexOf('[');
+      const [source] = JSON.parse(prompt.slice(arrayStart)) as string[];
+      if (source === '慢候选') {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      response.setHeader('Content-Type', 'application/json');
+      response.end(JSON.stringify({
+        id: `completion-${source}`,
+        created: 1,
+        model: 'test-model',
+        choices: [{
+          message: {
+            role: 'assistant',
+            content: JSON.stringify({
+              translations: [{ source, english: `en:${source}` }],
+            }),
+          },
+          finish_reason: 'stop',
+        }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      }));
+    });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const { port } = server.address() as AddressInfo;
+    let markFastCandidate: (() => void) | undefined;
+    const fastCandidate = new Promise<void>(resolve => {
+      markFastCandidate = resolve;
+    });
+    let batchFinished = false;
+
+    try {
+      const batch = translateBatch(
+        ['快候选', '慢候选'],
+        {
+          apiKey: 'test-key',
+          baseURL: `http://127.0.0.1:${port}/v1`,
+          model: 'test-model',
+          timeoutMs: 2_000,
+          maxOutputTokens: 256,
+        },
+        undefined,
+        source => {
+          if (source === '快候选') markFastCandidate?.();
+        },
+      ).finally(() => {
+        batchFinished = true;
+      });
+
+      await fastCandidate;
+      expect(batchFinished).toBe(false);
+      await expect(batch).resolves.toEqual(new Map([
+        ['快候选', 'en:快候选'],
+        ['慢候选', 'en:慢候选'],
+      ]));
+    } finally {
+      server.close();
+      await once(server, 'close');
+    }
+  });
 });

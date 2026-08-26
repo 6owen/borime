@@ -9,6 +9,7 @@ const execFileAsync = promisify(execFile);
 type CommandRunner = (
   executable: string,
   args: string[],
+  options?: { timeout?: number },
 ) => Promise<unknown>;
 
 export const squirrelExecutable =
@@ -103,11 +104,16 @@ export async function reloadRime(
 export async function requestCandidateRefresh(
   platform: NodeJS.Platform = process.platform,
   run: CommandRunner = execFileAsync,
+  timeoutMs = 300,
 ): Promise<boolean> {
   if (platform !== 'darwin') return false;
   try {
     const statusStartedAt = Date.now();
-    const statusResult = await run(squirrelExecutable, ['--getascii']);
+    const statusResult = await run(
+      squirrelExecutable,
+      ['--getascii'],
+      { timeout: timeoutMs },
+    );
     const statusDurationMs = Date.now() - statusStartedAt;
     const stdout =
       typeof statusResult === 'object' && statusResult !== null &&
@@ -117,11 +123,11 @@ export async function requestCandidateRefresh(
     // --getascii falls back to printing "nascii" after two seconds when no
     // input controller is active. Do not mistake that fallback for a live
     // Chinese session, or a delayed response could change the user's mode.
-    if (stdout !== 'nascii' || statusDurationMs >= 1_500) return false;
+    if (stdout !== 'nascii' || statusDurationMs >= timeoutMs) return false;
     // Squirrel forwards this command through a distributed notification. Even
     // when ascii_mode is already false, librime recomposes the active segment
     // and Squirrel redraws the candidate panel without inserting a key.
-    await run(squirrelExecutable, ['--nascii']);
+    await run(squirrelExecutable, ['--nascii'], { timeout: timeoutMs });
     return true;
   } catch {
     return false;

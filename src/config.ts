@@ -88,8 +88,8 @@ export function getConfig(): AppConfig {
     apiKey,
     baseURL,
     batchSize: positiveInteger(process.env.RIME_BILINGUAL_BATCH_SIZE, 5),
-    pollMs: positiveInteger(process.env.RIME_BILINGUAL_POLL_MS, 250),
-    debounceMs: positiveInteger(process.env.RIME_BILINGUAL_DEBOUNCE_MS, 800),
+    pollMs: positiveInteger(process.env.RIME_BILINGUAL_POLL_MS, 50),
+    debounceMs: positiveInteger(process.env.RIME_BILINGUAL_DEBOUNCE_MS, 200),
     timeoutMs: positiveInteger(
       process.env.RIME_BILINGUAL_TIMEOUT_MS,
       15_000,

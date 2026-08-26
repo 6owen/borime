@@ -1,6 +1,7 @@
 import { mkdir } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { getConfig } from './config.js';
+import { waitForStableSnapshot } from './debounce.js';
 import {
   appendDiagnosticEvent,
   type DiagnosticEvent,
@@ -8,7 +9,10 @@ import {
 import { DeferredRequests } from './deferred-requests.js';
 import { appendRotatingLine, WorkerLogger } from './logger.js';
 import { requestCandidateRefresh } from './platform.js';
-import { runPreemptible } from './preemption.js';
+import {
+  isCacheRefreshContinuation,
+  runPreemptible,
+} from './preemption.js';
 import { RetryLimitError, withRetry } from './retry.js';
 import {
   bumpVersion,
@@ -91,6 +95,63 @@ async function main(): Promise<void> {
   );
   let warnedMissingKey = false;
   const deferred = new DeferredRequests();
+  type RefreshRequest = {
+    config: ReturnType<typeof getConfig>;
+    batchId: string;
+    texts: string[];
+    detectedAt: number;
+  };
+  let pendingRefresh: RefreshRequest | undefined;
+  let refreshInFlight: Promise<void> | undefined;
+
+  const drainCandidateRefreshes = async (): Promise<void> => {
+    while (pendingRefresh) {
+      const request = pendingRefresh;
+      pendingRefresh = undefined;
+      const refreshRequested = await requestCandidateRefresh();
+      await diagnostic(request.config, {
+        type: refreshRequested
+          ? 'candidate_refresh_requested'
+          : 'candidate_refresh_failed',
+        batchId: request.batchId,
+        texts: request.texts,
+        durationMs: Date.now() - request.detectedAt,
+      });
+    }
+    refreshInFlight = undefined;
+  };
+
+  const scheduleCandidateRefresh = (request: RefreshRequest): void => {
+    // Coalesce refreshes while Squirrel is already responding. The newest cache
+    // version contains every prior write, so one final recomposition is enough.
+    pendingRefresh = request;
+    refreshInFlight ??= drainCandidateRefreshes();
+  };
+
+  const cacheTranslations = async (
+    translations: ReadonlyMap<string, string>,
+    request: RefreshRequest,
+  ): Promise<boolean> => {
+    const changedTexts: string[] = [];
+    for (const [source, english] of translations) {
+      known.set(source, english);
+      if (dynamic.get(source) === english) continue;
+      dynamic.set(source, english);
+      changedTexts.push(source);
+    }
+    if (changedTexts.length === 0) return false;
+
+    await writeTranslationMap(request.config.dynamicPath, dynamic);
+    await bumpVersion(request.config.versionPath);
+    await diagnostic(request.config, {
+      type: 'cache_written',
+      batchId: request.batchId,
+      texts: changedTexts,
+      durationMs: Date.now() - request.detectedAt,
+    });
+    scheduleCandidateRefresh({ ...request, texts: changedTexts });
+    return true;
+  };
 
   await logger.info(
     `[rime-bilingual] worker ready; ${known.size} cached translations; model=${config.model}`,
@@ -121,8 +182,8 @@ async function main(): Promise<void> {
       isDeferredBatch = true;
     }
 
-    const batchId = randomUUID();
-    const detectedAt = Date.now();
+    let batchId = randomUUID();
+    let detectedAt = Date.now();
     await diagnostic(config, {
       type: 'batch_detected',
       batchId,
@@ -131,23 +192,38 @@ async function main(): Promise<void> {
     });
 
     if (config.apiKey && !isDeferredBatch) {
-      await sleep(config.debounceMs);
-      const refreshed = await readQueueWindow(
-        config.queuePath,
-        config.cursorPath,
-        known,
-        config.batchSize,
-      );
-      if (refreshed.nextOffset !== window.nextOffset) {
+      const initialWindow = window;
+      const stable = await waitForStableSnapshot({
+        initial: window,
+        readLatest: () =>
+          readQueueWindow(
+            config.queuePath,
+            config.cursorPath,
+            known,
+            config.batchSize,
+          ),
+        revision: value => value.nextOffset,
+        debounceMs: config.debounceMs,
+        pollMs: config.pollMs,
+      });
+      window = stable.value;
+      if (stable.changes > 0) {
         await diagnostic(config, {
           type: 'batch_superseded',
           batchId,
-          texts: window.texts,
+          texts: initialWindow.texts,
           durationMs: Date.now() - detectedAt,
         });
-        continue;
+        if (window.texts.length === 0) continue;
+        batchId = randomUUID();
+        detectedAt = stable.stableSince;
+        await diagnostic(config, {
+          type: 'batch_detected',
+          batchId,
+          texts: window.texts,
+          debounceMs: config.debounceMs,
+        });
       }
-      window = refreshed;
     }
 
     if (!config.apiKey) {
@@ -170,6 +246,13 @@ async function main(): Promise<void> {
     const requestTexts = window.texts;
     const requestOffset = window.nextOffset;
     const requestStartedAt = Date.now();
+    const refreshRequest: RefreshRequest = {
+      config,
+      batchId,
+      texts: requestTexts,
+      detectedAt,
+    };
+    const progressivelyCached = new Set<string>();
     await diagnostic(config, {
       type: 'request_started',
       batchId,
@@ -181,7 +264,24 @@ async function main(): Promise<void> {
       const outcome = await runPreemptible(
         signal => withRetry(
           async () => {
-            const result = await translateBatch(requestTexts, config, signal);
+            const result = await translateBatch(
+              requestTexts,
+              config,
+              signal,
+              async (source, english) => {
+                if (
+                  source !== requestTexts[0] ||
+                  progressivelyCached.has(source)
+                ) {
+                  return;
+                }
+                progressivelyCached.add(source);
+                await cacheTranslations(
+                  new Map([[source, english]]),
+                  refreshRequest,
+                );
+              },
+            );
             if (result.size !== requestTexts.length) {
               const missing = requestTexts.filter(text => !result.has(text));
               throw new Error(
@@ -223,7 +323,12 @@ async function main(): Promise<void> {
             );
             return isDeferredBatch
               ? latest.texts.length > 0
-              : latest.nextOffset !== requestOffset;
+              : latest.nextOffset !== requestOffset &&
+                  !isCacheRefreshContinuation(
+                    latest.texts,
+                    requestTexts,
+                    known,
+                  );
           },
         },
       );
@@ -247,32 +352,12 @@ async function main(): Promise<void> {
         texts: requestTexts,
         durationMs: Date.now() - requestStartedAt,
       });
-      for (const [source, english] of translated) {
-        dynamic.set(source, english);
-        known.set(source, english);
-      }
       if (isDeferredBatch) deferred.complete(requestTexts);
-      await writeTranslationMap(config.dynamicPath, dynamic);
-      await bumpVersion(config.versionPath);
-      const refreshRequested = await requestCandidateRefresh();
+      await cacheTranslations(translated, refreshRequest);
       if (!isDeferredBatch) {
         await commitQueueOffset(config.cursorPath, requestOffset);
         await maintainQueue(config);
       }
-      await diagnostic(config, {
-        type: 'cache_written',
-        batchId,
-        texts: requestTexts,
-        durationMs: Date.now() - detectedAt,
-      });
-      await diagnostic(config, {
-        type: refreshRequested
-          ? 'candidate_refresh_requested'
-          : 'candidate_refresh_failed',
-        batchId,
-        texts: requestTexts,
-        durationMs: Date.now() - detectedAt,
-      });
       await logger.info(`[rime-bilingual] cached: ${requestTexts.join(' / ')}`);
     } catch (error) {
       const attempts = error instanceof RetryLimitError ? error.attempts : 1;

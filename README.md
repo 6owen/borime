@@ -10,7 +10,7 @@
 
 按空格确认时只上屏 `我的帽子`，英文不会进入正文。
 
-前 5 个候选的缓存缺失项会按当前排名写成一个队列快照；停止输入约 800 毫秒后，Node.js sidecar 只处理最新快照。OpenAI-compatible 接口会并行翻译每个候选，避免一条截断的大 JSON 丢掉整批。新输入出现时，正在进行的旧模型请求会在约一个轮询周期内取消；被取消批次的第一候选进入内存补偿队列，等输入空闲后补翻译。Rime 的按键线程从不等待网络。
+前 5 个候选的缓存缺失项会按当前排名写成一个队列快照；停止输入约 200 毫秒后，Node.js sidecar 只处理最新快照。OpenAI-compatible 接口会并行翻译每个候选，第一候选完成后立即写入缓存并刷新，其他候选无需阻塞它。新输入出现时，正在进行的旧模型请求会在约一个轮询周期内取消；被取消批次的第一候选进入内存补偿队列，等输入空闲后补翻译。Rime 的按键线程从不等待网络。
 
 ## 获取代码
 
@@ -119,7 +119,7 @@ pnpm diagnose -- --probe "诊断翻译延迟"
 
 探针会产生一次真实 API 请求。结构化事件保存在 Rime 用户目录的
 `bilingual/diagnostics.jsonl`，包含输入过的候选文字，文件权限仅限当前用户，且不会进入发行包。
-macOS 上 AI 写入缓存后，sidecar 会通过鼠须管的分布式通知通道请求活动 composition 重新计算；诊断会依次出现 `cache ready` 与 `candidate window refresh requested`，无需删除或重新输入字符。Windows 当前仍在下一次候选重算时读取新缓存。
+macOS 上 AI 写入缓存后，sidecar 会通过鼠须管的分布式通知通道请求活动 composition 重新计算；诊断会依次出现 `cache ready` 与 `candidate window refresh requested`，无需删除或重新输入字符。刷新在独立的合并队列中执行，300 ms 内没有活动鼠须管 controller 就放弃，不会阻塞后续翻译。Windows 当前仍在下一次候选重算时读取新缓存。
 
 ## 行为边界
 

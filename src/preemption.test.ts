@@ -1,5 +1,30 @@
 import { describe, expect, it } from 'vitest';
-import { runPreemptible } from './preemption.js';
+import {
+  isCacheRefreshContinuation,
+  runPreemptible,
+} from './preemption.js';
+
+describe('isCacheRefreshContinuation', () => {
+  it('recognizes the same composition after its top translation was cached', () => {
+    expect(
+      isCacheRefreshContinuation(
+        ['第二候选', '第三候选'],
+        ['第一候选', '第二候选', '第三候选'],
+        new Map([['第一候选', 'first candidate']]),
+      ),
+    ).toBe(true);
+  });
+
+  it('does not mistake newer user input for a cache-driven refresh', () => {
+    expect(
+      isCacheRefreshContinuation(
+        ['新的输入'],
+        ['第一候选', '第二候选'],
+        new Map([['第一候选', 'first candidate']]),
+      ),
+    ).toBe(false);
+  });
+});
 
 describe('runPreemptible', () => {
   it('aborts an in-flight operation when newer input arrives', async () => {

@@ -51,18 +51,30 @@ describe('findWeaselDeployer', () => {
 
 describe('requestCandidateRefresh', () => {
   it('asks the active Squirrel controller to recompose without typing a key', async () => {
-    const calls: Array<{ executable: string; args: string[] }> = [];
+    const calls: Array<{
+      executable: string;
+      args: string[];
+      timeout?: number;
+    }> = [];
 
     await expect(
-      requestCandidateRefresh('darwin', async (executable, args) => {
-        calls.push({ executable, args });
+      requestCandidateRefresh('darwin', async (executable, args, options) => {
+        calls.push({ executable, args, timeout: options?.timeout });
         return { stdout: args[0] === '--getascii' ? 'nascii\n' : '' };
       }),
     ).resolves.toBe(true);
 
     expect(calls).toEqual([
-      { executable: squirrelExecutable, args: ['--getascii'] },
-      { executable: squirrelExecutable, args: ['--nascii'] },
+      {
+        executable: squirrelExecutable,
+        args: ['--getascii'],
+        timeout: 300,
+      },
+      {
+        executable: squirrelExecutable,
+        args: ['--nascii'],
+        timeout: 300,
+      },
     ]);
   });
 
@@ -85,5 +97,22 @@ describe('requestCandidateRefresh', () => {
       }),
     ).resolves.toBe(false);
     expect(called).toBe(false);
+  });
+
+  it('bounds a missing Squirrel controller response', async () => {
+    const startedAt = Date.now();
+    await expect(
+      requestCandidateRefresh(
+        'darwin',
+        async (_executable, _args, options) => {
+          await new Promise(resolve =>
+            setTimeout(resolve, (options?.timeout ?? 0) + 5),
+          );
+          throw new Error('timed out');
+        },
+        10,
+      ),
+    ).resolves.toBe(false);
+    expect(Date.now() - startedAt).toBeLessThan(100);
   });
 });

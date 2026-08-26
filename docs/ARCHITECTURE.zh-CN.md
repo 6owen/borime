@@ -471,6 +471,17 @@ tail -f ~/Library/Rime/bilingual/worker.log
 tail -f ~/Library/Rime/bilingual/worker.error.log
 ```
 
+更推荐使用结构化诊断命令：
+
+```bash
+pnpm diagnose
+pnpm diagnose -- --watch
+pnpm diagnose -- --probe "诊断翻译延迟"
+```
+
+它把候选入队、防抖取消、模型请求、重试、模型耗时和缓存落盘拆成独立事件。
+探针绕过 Rime 直接调用模型，因此可以区分“模型慢”和“输入法链路慢”。
+
 ### 检查后台服务
 
 ```bash

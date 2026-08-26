@@ -1,5 +1,10 @@
 import { mkdir } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { getConfig } from './config.js';
+import {
+  appendDiagnosticEvent,
+  type DiagnosticEvent,
+} from './diagnostics.js';
 import { appendRotatingLine, WorkerLogger } from './logger.js';
 import { RetryLimitError, withRetry } from './retry.js';
 import {
@@ -27,6 +32,24 @@ const logger = new WorkerLogger({
 function describeError(error: unknown): string {
   if (error instanceof Error) return `${error.name}: ${error.message}`;
   return String(error);
+}
+
+async function diagnostic(
+  config: ReturnType<typeof getConfig>,
+  event: Omit<DiagnosticEvent, 'timestamp'>,
+): Promise<void> {
+  try {
+    await appendDiagnosticEvent(
+      config.diagnosticPath,
+      config.logMaxBytes,
+      event,
+    );
+  } catch (error) {
+    await logger.error(
+      '[rime-bilingual] diagnostics write failed:',
+      describeError(error),
+    );
+  }
 }
 
 async function maintainQueue(config: ReturnType<typeof getConfig>): Promise<void> {
@@ -68,6 +91,7 @@ async function main(): Promise<void> {
   await logger.info(
     `[rime-bilingual] worker ready; ${known.size} cached translations; model=${config.model}`,
   );
+  await diagnostic(config, { type: 'worker_ready', model: config.model });
 
   while (true) {
     config = getConfig();
@@ -87,6 +111,15 @@ async function main(): Promise<void> {
       continue;
     }
 
+    const batchId = randomUUID();
+    const detectedAt = Date.now();
+    await diagnostic(config, {
+      type: 'batch_detected',
+      batchId,
+      texts: window.texts,
+      debounceMs: config.debounceMs,
+    });
+
     if (config.apiKey) {
       await sleep(config.debounceMs);
       const refreshed = await readQueueWindow(
@@ -95,7 +128,15 @@ async function main(): Promise<void> {
         known,
         config.batchSize,
       );
-      if (refreshed.nextOffset !== window.nextOffset) continue;
+      if (refreshed.nextOffset !== window.nextOffset) {
+        await diagnostic(config, {
+          type: 'batch_superseded',
+          batchId,
+          texts: window.texts,
+          durationMs: Date.now() - detectedAt,
+        });
+        continue;
+      }
       window = refreshed;
     }
 
@@ -104,6 +145,11 @@ async function main(): Promise<void> {
         await logger.error(
           `[rime-bilingual] waiting for a translation API key in ${config.projectRoot}/.env`,
         );
+        await diagnostic(config, {
+          type: 'api_key_missing',
+          batchId,
+          texts: window.texts,
+        });
         warnedMissingKey = true;
       }
       await sleep(5_000);
@@ -111,6 +157,14 @@ async function main(): Promise<void> {
     }
 
     warnedMissingKey = false;
+    const requestStartedAt = Date.now();
+    await diagnostic(config, {
+      type: 'request_started',
+      batchId,
+      texts: window.texts,
+      model: config.model,
+      durationMs: requestStartedAt - detectedAt,
+    });
     try {
       const translated = await withRetry(
         async () => {
@@ -125,6 +179,16 @@ async function main(): Promise<void> {
           maxRetries: config.maxRetries,
           baseDelayMs: config.retryBaseMs,
           onRetry: async (error, retry) => {
+            await diagnostic(config, {
+              type: 'request_retry',
+              batchId,
+              texts: window.texts,
+              attempt: retry.attempt,
+              maxRetries: config.maxRetries,
+              delayMs: retry.delayMs,
+              durationMs: Date.now() - requestStartedAt,
+              error: describeError(error),
+            });
             await logger.error(
               `[rime-bilingual] translation attempt ${retry.attempt} failed; retry ${retry.retry}/${config.maxRetries} in ${retry.delayMs} ms:`,
               describeError(error),
@@ -132,6 +196,12 @@ async function main(): Promise<void> {
           },
         },
       );
+      await diagnostic(config, {
+        type: 'request_succeeded',
+        batchId,
+        texts: window.texts,
+        durationMs: Date.now() - requestStartedAt,
+      });
       for (const [source, english] of translated) {
         dynamic.set(source, english);
         known.set(source, english);
@@ -140,6 +210,12 @@ async function main(): Promise<void> {
       await bumpVersion(config.versionPath);
       await commitQueueOffset(config.cursorPath, window.nextOffset);
       await maintainQueue(config);
+      await diagnostic(config, {
+        type: 'cache_written',
+        batchId,
+        texts: window.texts,
+        durationMs: Date.now() - detectedAt,
+      });
       await logger.info(`[rime-bilingual] cached: ${window.texts.join(' / ')}`);
     } catch (error) {
       const attempts = error instanceof RetryLimitError ? error.attempts : 1;
@@ -156,6 +232,14 @@ async function main(): Promise<void> {
       );
       await commitQueueOffset(config.cursorPath, window.nextOffset);
       await maintainQueue(config);
+      await diagnostic(config, {
+        type: 'request_failed',
+        batchId,
+        texts: window.texts,
+        attempt: attempts,
+        durationMs: Date.now() - detectedAt,
+        error: describeError(cause),
+      });
       await logger.error(
         `[rime-bilingual] dropped batch after ${attempts} attempts: ${window.texts.join(' / ')}:`,
         describeError(cause),

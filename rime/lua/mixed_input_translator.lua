@@ -2,6 +2,7 @@
 -- Example: dakdapp -> 打开 APP (dakd = 打开, app = APP).
 
 local translator = {}
+local candidate_comment = ""
 
 local abbreviations = {
   ai = true, api = true, app = true, cpu = true, css = true, gpu = true,
@@ -85,7 +86,7 @@ function translator.func(input, segment, env)
                 segment.start,
                 segment._end,
                 text .. " " .. english,
-                "中英混输"
+                candidate_comment
               )
               candidate.quality = 1.15
               yield(candidate)
@@ -99,5 +100,6 @@ function translator.func(input, segment, env)
 end
 
 translator._english_display = english_display
+translator._candidate_comment = candidate_comment
 
 return translator

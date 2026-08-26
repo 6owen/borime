@@ -40,6 +40,7 @@ export interface AppConfig {
   failurePath: string;
   workerLogPath: string;
   workerErrorLogPath: string;
+  diagnosticPath: string;
   model: string;
   apiKey?: string;
   baseURL?: string;
@@ -79,6 +80,7 @@ export function getConfig(): AppConfig {
     failurePath: join(dataDirectory, 'failed-requests.jsonl'),
     workerLogPath: join(dataDirectory, 'worker.log'),
     workerErrorLogPath: join(dataDirectory, 'worker.error.log'),
+    diagnosticPath: join(dataDirectory, 'diagnostics.jsonl'),
     model:
       process.env.MASTRA_CHAT_MODEL ??
       process.env.DEEPSEEK_MODEL ??

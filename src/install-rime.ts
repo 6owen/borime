@@ -92,6 +92,7 @@ async function installRimeFiles(config: AppConfig): Promise<void> {
     config.queuePath,
     config.cursorPath,
     config.failurePath,
+    config.diagnosticPath,
   ]) {
     if (!(await exists(path))) {
       await writeFile(path, path === config.cursorPath ? '0\n' : '', 'utf8');

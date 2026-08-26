@@ -1,6 +1,7 @@
 package.path = "./rime/lua/?.lua;" .. package.path
 
 local translator = require("mixed_input_translator")
+assert(translator._candidate_comment == "", "mixed candidates must not show a redundant label")
 assert(translator._english_display("app", "app") == "APP")
 assert(translator._english_display("file", "file") == "file")
 assert(translator._english_display("api", "API") == "API")

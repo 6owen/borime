@@ -15,6 +15,7 @@
     "download:squirrel": "tsx src/download-squirrel.ts",
     "install:rime": "tsx src/install-rime.ts",
     "status": "tsx src/status.ts",
+    "diagnose": "tsx src/diagnose.ts",
     "cache:export": "tsx src/translation-cache.ts export",
     "cache:import": "tsx src/translation-cache.ts import",
     "package:release": "pnpm build && tsx src/package-release.ts"

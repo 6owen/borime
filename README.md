@@ -10,6 +10,131 @@
 
 按空格确认时只上屏 `我的帽子`，英文不会进入正文。
 
+## 项目位置、配置位置与修改后如何生效
+
+### 源码与运行目录
+
+项目真源位于：
+
+```text
+/Users/wangwenbo/Desktop/Demo/rime-bilingual-ime
+```
+
+所有需要长期保留、提交 Git 或分享给其他人的功能都应在这个仓库中修改。不要把 `~/Library/Rime` 当作源码目录：它是鼠须管的部署目录和个人数据库，仓库中的配置经安装器复制到那里。
+
+```text
+Git 仓库                               本机运行目录
+rime/ + vendor/rime-ice  ──部署──▶    ~/Library/Rime
+src/*.ts                ──构建──▶    dist/*.js ──▶ AI Worker
+.env                    ──读取──▶    本机 AI 配置
+                                      *.userdb / bilingual/*
+                                      由运行时自动维护
+```
+
+macOS 后台服务定义位于：
+
+```text
+~/Library/LaunchAgents/com.local.rime-bilingual.plist
+```
+
+它启动仓库中的 `dist/worker.js`，因此移动仓库后必须重新执行 `pnpm install:rime`，使后台服务指向新位置。
+
+### 功能应该在哪里修改
+
+| 想修改的功能 | 源码位置 |
+|---|---|
+| 英文翻译的显示、候选数量和 `翻译中…` | `rime/lua/bilingual_filter.lua` |
+| `dakdapp → 打开 APP` 中英混输 | `rime/lua/mixed_input_translator.lua` |
+| 中英文自动空格 | `rime/lua/mixed_spacing_filter.lua`、`rime/lua/ascii_spacing_processor.lua` |
+| 回车确认候选或输入原始拼音 | `rime/lua/smart_enter.lua` |
+| 开关、快捷键、固定候选、候选数量 | `rime/double_pinyin_flypy.custom.yaml` |
+| 候选窗颜色与样式 | `rime/squirrel.custom.yaml` |
+| AI prompt 和模型调用 | `src/translator.ts` |
+| AI 队列、取消、缓存与优先级 | `src/worker.ts` |
+| 防抖与请求调度 | `src/debounce.ts`、`src/preemption.ts` |
+| 本机配置读取 | `src/config.ts` |
+| macOS/Windows 安装与后台任务 | `src/install-rime.ts`、`src/platform.ts` |
+
+以下目录不是源码真源，不应直接维护：
+
+- `dist/` 是 TypeScript 编译产物。
+- `vendor/rime-ice/` 是雾凇拼音 Git submodule，通常通过更新 submodule 升级，不直接混入个人修改。
+- `~/Library/Rime/build/` 是 Rime 编译产物。
+- `~/Library/Rime` 中已部署的 Lua/YAML 会在下次安装时被仓库版本覆盖。
+
+### 本机配置和个人数据在哪里
+
+AI 本机配置位于仓库根目录的 `.env`，包括 API Base URL、API Key、模型、超时、防抖和重试次数。`.env` 已被 Git 忽略，但仍是本机明文文件，不得上传或放入发行包。
+
+Rime 个人数据位于：
+
+```text
+~/Library/Rime/
+├── rime_ice.userdb/             # 中文个人词频
+├── melt_eng.userdb/             # 英文用户数据
+└── bilingual/
+    ├── dynamic.tsv              # AI 翻译缓存
+    ├── requests.txt             # 请求历史
+    ├── diagnostics.jsonl        # 诊断事件
+    └── failed-requests.jsonl
+```
+
+这些数据不进入 Git 仓库，安装和升级时应当保留。当前还没有统一的 `settings.json` 或设置 UI；`rime/*.custom.yaml` 中既有产品默认配置，也有少量个人规则。未来的配置分层方案见[项目目录、个人配置与产品化组织](docs/PROJECT-ORGANIZATION.zh-CN.md)。
+
+### 修改后如何在本机生效
+
+TypeScript 的运行链路是：
+
+```text
+src/*.ts → pnpm build → dist/*.js → 重启 LaunchAgent
+```
+
+只修改 TypeScript 时执行：
+
+```bash
+cd /Users/wangwenbo/Desktop/Demo/rime-bilingual-ime
+pnpm check
+pnpm test
+pnpm build
+launchctl kickstart -k gui/$(id -u)/com.local.rime-bilingual
+```
+
+Rime 的运行链路是：
+
+```text
+仓库 rime/ + vendor/rime-ice
+        → pnpm install:rime
+        → ~/Library/Rime
+        → 鼠须管重新部署并生成 build/
+```
+
+修改 Lua、YAML、快捷键或候选样式时执行：
+
+```bash
+cd /Users/wangwenbo/Desktop/Demo/rime-bilingual-ime
+pnpm test
+pnpm install:rime
+```
+
+修改 `.env` 后不需要重建 Rime，只需重启 AI Worker：
+
+```bash
+launchctl kickstart -k gui/$(id -u)/com.local.rime-bilingual
+```
+
+如果不想区分修改类型，可以使用完整流程：
+
+```bash
+cd /Users/wangwenbo/Desktop/Demo/rime-bilingual-ime
+pnpm check
+pnpm test
+pnpm build
+pnpm install:rime
+pnpm diagnose
+```
+
+不要在 LaunchAgent 正常运行时另外执行 `pnpm worker`，否则会同时出现两个 Worker，争用同一个请求队列。
+
 前 5 个候选的缓存缺失项会按当前排名写成一个队列快照；停止输入约 200 毫秒后，Node.js sidecar 只处理最新快照。OpenAI-compatible 接口会并行翻译每个候选，第一候选完成后立即写入缓存并刷新，其他候选无需阻塞它。新输入出现时，正在进行的旧模型请求会在约一个轮询周期内取消；被取消批次的第一候选进入内存补偿队列，等输入空闲后补翻译。Rime 的按键线程从不等待网络。
 
 ## 获取代码

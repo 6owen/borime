@@ -5,7 +5,7 @@
 当前系统主要涉及两个目录，但它们不是两份需要合并的源码：
 
 ```text
-/Users/wangwenbo/Desktop/rime-bilingual-ime
+/Users/wangwenbo/Desktop/Demo/rime-bilingual-ime
     产品真源：源码、测试、安装器和当前正在运行的 AI worker
 
 /Users/wangwenbo/Library/Rime

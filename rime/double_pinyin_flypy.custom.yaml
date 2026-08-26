@@ -26,6 +26,11 @@ patch:
     - { when: always, accept: Control+Shift+m, toggle: mixed_input }
     - { when: always, accept: Control+Shift+s, toggle: auto_spacing }
 
+  # Rime userdb learns selections, but its decayed dynamic weight is not a raw
+  # commit-count sort. Keep explicit personal exceptions in this small pin layer.
+  "pin_cand_filter/+":
+    - "you\t有"
+
   bilingual/max_candidates: 5
   bilingual/max_comment_length: 42
   mixed_input/max_candidates: 3

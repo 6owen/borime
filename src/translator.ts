@@ -45,59 +45,85 @@ export function normalizeTranslation(value: string): string {
     .slice(0, 180);
 }
 
+type TranslationConfig = Pick<
+  AppConfig,
+  'apiKey' | 'baseURL' | 'model' | 'timeoutMs' | 'maxOutputTokens'
+>;
+
+async function translateCompatibleCandidate(
+  text: string,
+  config: TranslationConfig & { apiKey: string; baseURL: string },
+  abortSignal?: AbortSignal,
+): Promise<[string, string]> {
+  const output = parseCompatibleTranslationResponse(
+    (
+      await generateText({
+        model: createOpenAICompatible({
+          name: 'customOpenAI',
+          apiKey: config.apiKey,
+          baseURL: config.baseURL,
+        })(config.model),
+        system: systemPrompt,
+        prompt: `Translate these Chinese candidates:\n${JSON.stringify([text])}`,
+        maxOutputTokens: Math.max(128, Math.min(config.maxOutputTokens, 512)),
+        timeout: config.timeoutMs,
+        abortSignal,
+        maxRetries: 0,
+        providerOptions: {
+          customOpenAI: {
+            thinking: { type: 'disabled' },
+          },
+        },
+      })
+    ).text,
+  );
+  const item = output.translations.find(candidate => cleanCell(candidate.source) === text);
+  const english = item ? normalizeTranslation(item.english) : '';
+  if (!english) throw new Error(`model omitted translation: ${text}`);
+  return [text, english];
+}
+
 export async function translateBatch(
   texts: string[],
-  config: Pick<
-    AppConfig,
-    'apiKey' | 'baseURL' | 'model' | 'timeoutMs' | 'maxOutputTokens'
-  >,
+  config: TranslationConfig,
   abortSignal?: AbortSignal,
 ): Promise<Map<string, string>> {
   if (!config.apiKey) throw new Error('Translation API key is not configured');
   if (texts.length === 0) return new Map();
 
+  if (config.baseURL) {
+    const compatibleConfig = {
+      ...config,
+      apiKey: config.apiKey,
+      baseURL: config.baseURL,
+    };
+    const entries = await Promise.all(
+      texts.map(text =>
+        translateCompatibleCandidate(text, compatibleConfig, abortSignal),
+      ),
+    );
+    return new Map(entries);
+  }
+
   const prompt = `Translate these Chinese candidates:\n${JSON.stringify(texts)}`;
   const maxOutputTokens = Math.max(config.maxOutputTokens, texts.length * 64);
-  const output = config.baseURL
-    ? parseCompatibleTranslationResponse(
-        (
-          await generateText({
-            model: createOpenAICompatible({
-              name: 'customOpenAI',
-              apiKey: config.apiKey,
-              baseURL: config.baseURL,
-            })(config.model),
-            system: systemPrompt,
-            prompt,
-            maxOutputTokens,
-            timeout: config.timeoutMs,
-            abortSignal,
-            maxRetries: 0,
-            providerOptions: {
-              customOpenAI: {
-                thinking: { type: 'disabled' },
-              },
-            },
-          })
-        ).text,
-      )
-    : (
-        await generateText({
-          model: createDeepSeek({ apiKey: config.apiKey })(config.model),
-          system: systemPrompt,
-          prompt,
-          output: Output.object({ schema: translationsSchema }),
-          maxOutputTokens,
-          timeout: config.timeoutMs,
-          abortSignal,
-          maxRetries: 0,
-          providerOptions: {
-            deepseek: {
-              thinking: { type: 'disabled' },
-            } satisfies DeepSeekLanguageModelChatOptions,
-          },
-        })
-      ).output;
+  const output = (
+    await generateText({
+      model: createDeepSeek({ apiKey: config.apiKey })(config.model),
+      system: systemPrompt,
+      prompt,
+      output: Output.object({ schema: translationsSchema }),
+      maxOutputTokens,
+      timeout: config.timeoutMs,
+      abortSignal,
+      maxRetries: 0,
+      providerOptions: {
+        deepseek: {
+          thinking: { type: 'disabled' },
+        } satisfies DeepSeekLanguageModelChatOptions,
+      },
+    })
+  ).output;
 
   const requested = new Set(texts);
   const result = new Map<string, string>();

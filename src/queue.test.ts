@@ -44,6 +44,23 @@ describe('request queue', () => {
     expect(window.nextOffset).toBe(Buffer.byteLength(content));
   });
 
+  it('uses the latest ranked candidate snapshot instead of stale append order', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'rime-bilingual-'));
+    const queue = join(directory, 'requests.txt');
+    const cursor = join(directory, '.queue-offset');
+    const content = [
+      '@snapshot\t招一个\t照一个\t找一个地方',
+      '@snapshot\t找一个地方\t找一个\t招一个\t照一个',
+      '',
+    ].join('\n');
+    await writeFile(queue, content, 'utf8');
+
+    const window = await readQueueWindow(queue, cursor, new Map(), 3);
+
+    expect(window.texts).toEqual(['找一个地方', '找一个', '招一个']);
+    expect(window.nextOffset).toBe(Buffer.byteLength(content));
+  });
+
   it('reports pending lines from the committed byte offset', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'rime-bilingual-'));
     const queue = join(directory, 'requests.txt');

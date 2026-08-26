@@ -134,4 +134,59 @@ describe('OpenAI-compatible translation', () => {
       await closed;
     }
   });
+
+  it('isolates each candidate so one truncated batch cannot lose every translation', async () => {
+    let requestCount = 0;
+    const server = createServer(async (request, response) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) chunks.push(Buffer.from(chunk));
+      const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as {
+        messages?: Array<{ role?: string; content?: string }>;
+      };
+      requestCount += 1;
+      const prompt = body.messages?.findLast(message => message.role === 'user')
+        ?.content ?? '';
+      const arrayStart = prompt.indexOf('[');
+      const sources = JSON.parse(prompt.slice(arrayStart)) as string[];
+      response.setHeader('Content-Type', 'application/json');
+      const content = sources.length === 1
+        ? JSON.stringify({
+            translations: [{ source: sources[0], english: `en:${sources[0]}` }],
+          })
+        : '{"translations":[';
+      response.end(JSON.stringify({
+        id: `completion-${requestCount}`,
+        created: 1,
+        model: 'test-model',
+        choices: [{
+          message: { role: 'assistant', content },
+          finish_reason: 'stop',
+        }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      }));
+    });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const { port } = server.address() as AddressInfo;
+
+    try {
+      await expect(
+        translateBatch(['甲', '乙', '丙'], {
+          apiKey: 'test-key',
+          baseURL: `http://127.0.0.1:${port}/v1`,
+          model: 'test-model',
+          timeoutMs: 2_000,
+          maxOutputTokens: 256,
+        }),
+      ).resolves.toEqual(new Map([
+        ['甲', 'en:甲'],
+        ['乙', 'en:乙'],
+        ['丙', 'en:丙'],
+      ]));
+      expect(requestCount).toBe(3);
+    } finally {
+      server.close();
+      await once(server, 'close');
+    }
+  });
 });

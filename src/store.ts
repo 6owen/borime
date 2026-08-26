@@ -196,21 +196,36 @@ export async function readQueueWindow(
     const buffer = Buffer.alloc(queueSize - offset);
     await handle.read(buffer, 0, buffer.length, offset);
     const recent = new Map<string, true>();
+    let latestSnapshot: string[] | undefined;
     let lineStart = 0;
     let nextOffset = offset;
 
     for (let index = 0; index < buffer.length; index += 1) {
       if (buffer[index] !== 0x0a) continue;
-      const text = cleanCell(buffer.subarray(lineStart, index).toString('utf8'));
+      const line = buffer.subarray(lineStart, index).toString('utf8');
       nextOffset = offset + index + 1;
       lineStart = index + 1;
+      if (line.startsWith('@snapshot\t')) {
+        const seen = new Set<string>();
+        latestSnapshot = [];
+        for (const cell of line.split('\t').slice(1)) {
+          const text = cleanCell(cell);
+          if (!text || known.has(text) || seen.has(text)) continue;
+          seen.add(text);
+          latestSnapshot.push(text);
+        }
+        continue;
+      }
+      const text = cleanCell(line);
       if (!text || known.has(text)) continue;
       // Reinsert duplicates so the map preserves the most recent request order.
       recent.delete(text);
       recent.set(text, true);
     }
 
-    const texts = [...recent.keys()].slice(-limit);
+    const texts = latestSnapshot
+      ? latestSnapshot.slice(0, limit)
+      : [...recent.keys()].slice(-limit);
     return { texts, currentOffset: offset, nextOffset };
   } finally {
     await handle.close();

@@ -239,16 +239,16 @@ sidecar 由 `src/worker.ts` 实现：macOS 通过 LaunchAgent
 
 ### 6.1 为什么使用追加队列
 
-Lua 只执行一次追加写，不需要锁数据库，也不需要建立 socket。`requests.txt` 是 append-only 日志，`.queue-offset` 是已经消费到的字节偏移。
+Lua 对每个发生变化的候选窗只执行一次追加写，不需要锁数据库，也不需要建立 socket。每行以 `@snapshot` 开头，随后按当前 UI 顺序保存最多 5 个缓存未命中候选。`requests.txt` 是 append-only 日志，`.queue-offset` 是已经消费到的字节偏移。
 
 读取算法只接受以换行结尾的完整记录，避免并发读取半行。它还会：
 
 - 跳过三层缓存中已经存在的中文。
-- 对未消费窗口内的重复候选去重。
-- 保留最近出现顺序。
-- 只取最新 `batchSize` 条，当前为 5。
+- 兼容升级前的单候选旧记录。
+- 只采用最新一条完整快照，并保留快照中的候选排名。
+- 跳过快照内的重复项，只取前 `batchSize` 条，当前为 5。
 
-队列行数不等于真实积压量。大量行只是打字过程留下的中间候选；sidecar 有意折叠陈旧状态，而不是按 FIFO 把每个中间状态都付费翻译。
+队列行数不等于真实积压量。每行是一个历史候选窗；sidecar 有意折叠陈旧快照，而不是按 FIFO 把每个中间状态都付费翻译。显式保存排名很重要：仅追加独立词条会在多次候选重排后丢失“最终第一候选”这一信息。
 
 ### 6.2 防抖与“最新优先”
 
@@ -290,9 +290,11 @@ provider 选择逻辑：
   → createDeepSeek(...)(DEEPSEEK_MODEL)
 ```
 
-两个 provider 都使用 `generateText`。官方 DeepSeek 路径使用 `Output.object`；OpenAI
-兼容路径发送普通 chat completion，不携带 `response_format`，随后在本地解析 JSON
-文本。两条路径最终都通过同一份 Zod schema 约束输出：
+两个 provider 都使用 `generateText`。官方 DeepSeek 路径把当前候选作为一批交给
+`Output.object`；OpenAI 兼容路径则把候选拆成最多 5 个并行的单项 chat completion，
+不携带 `response_format`，随后分别在本地解析 JSON 文本。拆分的原因是当前兼容接口
+曾在生成批量 JSON 约 24 秒后截断整个响应；单项 JSON 更短，彼此也不会共享截断边界。
+两条路径最终都通过同一份 Zod schema 约束输出：
 
 ```ts
 {
@@ -309,10 +311,10 @@ worker 还会验证返回数量、过滤未知 `source`、清理换行和括号�
 
 当前兼容接口使用：
 
-- 批量大小：5。
+- 每个候选窗最多 5 个并行单项请求。
 - 防抖：800 ms。
 - 超时：30 秒。
-- 最大输出 token：至少 2048。
+- 单项最大输出 token：128～512（受环境变量上限约束）。
 
 DeepSeek thinking 在两条 provider 路径中都显式关闭。翻译只需要短 JSON；如果沿用模型默认的 high thinking，内部推理可能独占 2048 个输出 token，使正文为 0 或 JSON 被截断。AI SDK 内建重试设为 0，避免与 worker 的 2／4／8 秒重试叠加。
 
@@ -387,6 +389,19 @@ Control + Shift + B
 从“鼠须管”切到“ABC”属于 macOS 输入源切换，不等同于 Rime 内部 ASCII 模式。
 
 当前机器安装了官方 Squirrel Nightly。它与稳定版界面几乎一致，主要增加了 macOS 26 下程序化切换输入源时清理遗留 composition 的兜底逻辑。当前机器是 macOS 15，因此日常使用差异很小。
+
+### 8.5 用户词频与明确置顶
+
+主翻译器默认启用 `rime_ice.userdb`。它会记录选词，但排序权重同时包含提交次数、时间衰减和词典权重，并不是“选择次数更大就必然立即排在前面”。例如本机导出的记录中，`有 / you` 为 13 次、`又 / you` 为 9 次，说明学习链路正常；二者仍可能因动态权重和静态词典权重而保持原顺序。
+
+对于已经明确、不希望继续等待算法收敛的个人偏好，使用雾凇自带的 `pin_cand_filter`。本项目在 `double_pinyin_flypy.custom.yaml` 中追加了：
+
+```yaml
+"pin_cand_filter/+":
+  - "you\t有"
+```
+
+左侧使用候选的完整 preedit；小鹤双拼输入码即使是 `yz`，显示与候选 preedit 仍为 `you`。这个规则只调整已有候选顺序，不会制造不存在的编码，也不关闭 userdb 学习。以后遇到稳定的个人偏好，可以继续在该列表追加，而不必改雾凇主词库。
 
 ## 9. 文件与部署模型
 

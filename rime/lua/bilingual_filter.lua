@@ -75,8 +75,21 @@ local function has_han(text)
   return text:find("[\228-\233][\128-\191][\128-\191]") ~= nil
 end
 
-local function request_translation(env, text)
-  if env.pending[text] then return end
+local function clean_request_text(text)
+  return text:gsub("[\t\r\n]", " "):gsub("%s+", " ")
+end
+
+local function format_snapshot(texts)
+  local cells = { "@snapshot" }
+  for _, text in ipairs(texts) do
+    cells[#cells + 1] = clean_request_text(text)
+  end
+  return table.concat(cells, "\t") .. "\n"
+end
+
+local function request_snapshot(env, input_code, texts)
+  local signature = input_code .. "\0" .. table.concat(texts, "\0")
+  if env.last_snapshot_signature == signature then return end
   local maintenance = io.open(env.queue_lock_path, "r")
   if maintenance then
     maintenance:close()
@@ -84,9 +97,9 @@ local function request_translation(env, text)
   end
   local file = io.open(env.queue_path, "a")
   if not file then return end
-  file:write(text:gsub("[\t\r\n]", " "), "\n")
+  file:write(format_snapshot(texts))
   file:close()
-  env.pending[text] = true
+  env.last_snapshot_signature = signature
 end
 
 function filter.init(env)
@@ -100,7 +113,7 @@ function filter.init(env)
   env.version_path = join_path(user_dir, "cache.version")
   env.max_candidates = config:get_int("bilingual/max_candidates") or 5
   env.max_comment_length = config:get_int("bilingual/max_comment_length") or 42
-  env.pending = {}
+  env.last_snapshot_signature = nil
   env.version = nil
   env.dictionary_translations = load_tsv(env.dictionary_path)
   env.seed_translations = nil
@@ -116,34 +129,66 @@ function filter.func(input, env)
   end
 
   reload_cache(env)
-  local index = 0
-  for candidate in input:iter() do
-    index = index + 1
-    local text = candidate.text
-    local english, source = lookup_translation(env, text)
-    if index <= env.max_candidates and english then
-      env.pending[text] = nil
-      local prefix = source == "ai" and "AI · " or ""
-      local display = truncate_text(prefix .. english, env.max_comment_length)
-      local comment = append_comment(candidate, display)
-      -- Keep the original candidate text so confirming it only commits Chinese.
-      -- English lives in the comment field and is visible only in the candidate UI.
-      yield(ShadowCandidate(candidate, candidate.type, text, comment))
-    else
-      if index <= env.max_candidates
-        and has_han(text)
-        and candidate.type ~= "mixed_input" then
-        request_translation(env, text)
-        local comment = append_comment(candidate, "AI 翻译中…")
-        yield(ShadowCandidate(candidate, candidate.type, text, comment))
+  local leading = {}
+  local leading_emitted = false
+
+  local function emit_leading()
+    if leading_emitted then return end
+    leading_emitted = true
+    local decorated = {}
+    local requested = {}
+    for _, candidate in ipairs(leading) do
+      local text = candidate.text
+      local english, source = lookup_translation(env, text)
+      if english then
+        local prefix = source == "ai" and "AI · " or ""
+        decorated[#decorated + 1] = {
+          candidate = candidate,
+          display = truncate_text(prefix .. english, env.max_comment_length),
+        }
+      elseif has_han(text) and candidate.type ~= "mixed_input" then
+        requested[#requested + 1] = text
+        decorated[#decorated + 1] = {
+          candidate = candidate,
+          display = "AI 翻译中…",
+        }
       else
-        yield(candidate)
+        decorated[#decorated + 1] = { candidate = candidate }
+      end
+    end
+
+    if #requested > 0 then
+      request_snapshot(env, env.engine.context.input or "", requested)
+    end
+    for _, item in ipairs(decorated) do
+      if item.display then
+        local candidate = item.candidate
+        local comment = append_comment(candidate, item.display)
+        yield(ShadowCandidate(
+          candidate,
+          candidate.type,
+          candidate.text,
+          comment
+        ))
+      else
+        yield(item.candidate)
       end
     end
   end
+
+  for candidate in input:iter() do
+    if #leading < env.max_candidates then
+      leading[#leading + 1] = candidate
+    else
+      emit_leading()
+      yield(candidate)
+    end
+  end
+  emit_leading()
 end
 
 filter._reload_cache = reload_cache
 filter._truncate_text = truncate_text
+filter._format_snapshot = format_snapshot
 
 return filter

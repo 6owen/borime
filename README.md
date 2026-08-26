@@ -119,12 +119,12 @@ pnpm diagnose -- --probe "诊断翻译延迟"
 
 探针会产生一次真实 API 请求。结构化事件保存在 Rime 用户目录的
 `bilingual/diagnostics.jsonl`，包含输入过的候选文字，文件权限仅限当前用户，且不会进入发行包。
-AI 写入缓存后，已经打开的候选窗不会自行刷新；诊断出现 `cache ready` 后重新输入该词即可看到英文。
+macOS 上 AI 写入缓存后，sidecar 会通过鼠须管的分布式通知通道请求活动 composition 重新计算；诊断会依次出现 `cache ready` 与 `candidate window refresh requested`，无需删除或重新输入字符。Windows 当前仍在下一次候选重算时读取新缓存。
 
 ## 行为边界
 
 - 初始词表和已缓存词会立即在候选注释中显示英文，但始终只上屏中文。
-- 新词第一次出现时显示 `AI 翻译中…`；sidecar 完成翻译后，后续输入或再次输入会显示带 `AI ·` 标记的英文候选提示。
+- 新词第一次出现时显示 `AI 翻译中…`；macOS sidecar 完成翻译后会自动刷新为带 `AI ·` 标记的英文候选提示。
 - 纯中文模式不会创建翻译请求。
 - 动态缓存位于 Rime 用户目录下的 `bilingual/dynamic.tsv`，可以私下备份或人工修订，不应提交到公开仓库。
 - 英文注释最多显示 42 个 Unicode 字符，超长词典释义以省略号收尾；缓存仍保留完整值。

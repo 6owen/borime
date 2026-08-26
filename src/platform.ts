@@ -6,6 +6,11 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 
+type CommandRunner = (
+  executable: string,
+  args: string[],
+) => Promise<unknown>;
+
 export const squirrelExecutable =
   '/Library/Input Methods/Squirrel.app/Contents/MacOS/Squirrel';
 export const windowsTaskName = 'RimeBilingualIME';
@@ -93,6 +98,34 @@ export async function reloadRime(
     return 'Weasel';
   }
   throw new Error(`automatic Rime deployment is not supported on ${platform}`);
+}
+
+export async function requestCandidateRefresh(
+  platform: NodeJS.Platform = process.platform,
+  run: CommandRunner = execFileAsync,
+): Promise<boolean> {
+  if (platform !== 'darwin') return false;
+  try {
+    const statusStartedAt = Date.now();
+    const statusResult = await run(squirrelExecutable, ['--getascii']);
+    const statusDurationMs = Date.now() - statusStartedAt;
+    const stdout =
+      typeof statusResult === 'object' && statusResult !== null &&
+        'stdout' in statusResult
+        ? String(statusResult.stdout).trim()
+        : '';
+    // --getascii falls back to printing "nascii" after two seconds when no
+    // input controller is active. Do not mistake that fallback for a live
+    // Chinese session, or a delayed response could change the user's mode.
+    if (stdout !== 'nascii' || statusDurationMs >= 1_500) return false;
+    // Squirrel forwards this command through a distributed notification. Even
+    // when ascii_mode is already false, librime recomposes the active segment
+    // and Squirrel redraws the candidate panel without inserting a key.
+    await run(squirrelExecutable, ['--nascii']);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function restartBackgroundWorker(

@@ -7,6 +7,7 @@ import {
 } from './diagnostics.js';
 import { DeferredRequests } from './deferred-requests.js';
 import { appendRotatingLine, WorkerLogger } from './logger.js';
+import { requestCandidateRefresh } from './platform.js';
 import { runPreemptible } from './preemption.js';
 import { RetryLimitError, withRetry } from './retry.js';
 import {
@@ -253,12 +254,21 @@ async function main(): Promise<void> {
       if (isDeferredBatch) deferred.complete(requestTexts);
       await writeTranslationMap(config.dynamicPath, dynamic);
       await bumpVersion(config.versionPath);
+      const refreshRequested = await requestCandidateRefresh();
       if (!isDeferredBatch) {
         await commitQueueOffset(config.cursorPath, requestOffset);
         await maintainQueue(config);
       }
       await diagnostic(config, {
         type: 'cache_written',
+        batchId,
+        texts: requestTexts,
+        durationMs: Date.now() - detectedAt,
+      });
+      await diagnostic(config, {
+        type: refreshRequested
+          ? 'candidate_refresh_requested'
+          : 'candidate_refresh_failed',
         batchId,
         texts: requestTexts,
         durationMs: Date.now() - detectedAt,

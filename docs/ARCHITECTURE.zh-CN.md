@@ -204,8 +204,8 @@ Lua 初始化时读取三层 TSV；其中大型 `cedict.tsv` 在一个 Rime 会�
 
 1. 候选立即显示 `AI 翻译中…`。
 2. 中文候选仍可立即确认，不等待模型。
-3. 中文文本追加到 `requests.txt`。
-4. 同一 Lua 会话用 `env.pending` 避免重复追加相同候选。
+3. 当前前 5 个缓存未命中候选按排名写成一条 `@snapshot` 记录。
+4. 同一 Lua 会话用“当前编码 + 候选快照”签名避免重复追加相同窗口。
 
 ### 5.3 缓存失效协议
 
@@ -217,19 +217,22 @@ sidecar 每次成功写入 `dynamic.tsv` 后，会更新 `cache.version`。Lua �
 
 查找时按 `dynamic → seed → dictionary` 顺序访问三个 Map，仍然保持原有覆盖语义。基准测试中，AI 写回后的同步重载由约 94 ms 降至约 0.17 ms；网络调用本身始终位于独立 sidecar，不占用输入线程。
 
-### 5.4 为什么候选不会自动原地刷新
+### 5.4 macOS 如何自动原地刷新
 
-Lua 在 Squirrel 内执行，Node.js 在另一个进程执行。sidecar 完成网络请求后只能写磁盘，不能安全地回调正在运行的 Rime candidate pipeline。
+Lua 在 Squirrel 内执行，Node.js 在另一个进程执行，不能直接跨进程回调 Rime candidate pipeline。macOS 版改用鼠须管已经公开使用的分布式通知通道：sidecar 写入缓存并更新版本后先用 `Squirrel --getascii` 查询活动控制器；只有它在 1.5 秒内明确回复 `nascii`，才执行 `Squirrel --nascii`。该命令不会合成按键，而是通知当前 `SquirrelInputController` 再次设置 `ascii_mode = false`。如果用户已经切到内部英文模式或离开鼠须管，刷新会被跳过，避免延迟响应擅自改变输入模式。
 
-因此第一次通常经历：
+librime 的 `Context::set_option` 即使值没有变化也会触发 `option_update_notifier`；引擎收到通知后对活动 composition 执行 `RefreshNonConfirmedComposition()`。鼠须管随后调用 `rimeUpdate()`，因此当前候选窗会重新运行 Lua filter、读到新版本并原地显示英文。
+
+因此 macOS 第一次未缓存输入会经历：
 
 ```text
 第一次候选重算：发一个  AI 翻译中…
 DeepSeek 完成：   dynamic.tsv 已有 send one
-下一次候选重算：发一个  AI · send one
+sidecar 通知：    Squirrel --nascii（不产生字符）
+自动候选重算：   发一个  AI · send one
 ```
 
-“下一次候选重算”可以来自继续输入、增删一个拼音字符，或重新输入。它不是网络没有调用，而是 UI 没有跨进程主动刷新。
+该通道不需要 macOS 辅助功能权限，也不会向前台应用注入虚拟键。Windows 小狼毫目前没有接入等价的跨进程刷新命令；其缓存仍会在下一次真实候选重算时可见。
 
 ## 6. Node.js sidecar：异步慢路径
 
@@ -528,7 +531,7 @@ Get-Content "$env:APPDATA\Rime\bilingual\worker.log" -Wait
 | 现象 | 最可能原因 | 检查方式 | 处理方式 |
 | --- | --- | --- | --- |
 | 所有候选都没有英文 | 双语开关关闭或 Lua 未部署 | 看方案状态、检查已部署 Lua | 按 `Control+Shift+B`；重新部署 |
-| 只有常见词有英文 | CC-CEDICT 命中，AI 尚未完成 | 看是否显示 `AI 翻译中…` | 停顿后增删字符或重新输入 |
+| 只有常见词有英文 | CC-CEDICT 命中，AI 尚未完成 | `pnpm diagnose -- --watch` | 等待 `cache ready` 与 `candidate window refresh requested` |
 | 显示 `AI 翻译中…` 很久 | API 超时、Key/模型错误 | `worker.error.log` | 检查 `.env`、接口和超时 |
 | 显示 `AI · English` | 命中 `dynamic.tsv` | 查 `dynamic.tsv` | 正常的 AI 缓存结果 |
 | 英文释义很长、像词典 | CC-CEDICT 多义项 | 查 `cedict.tsv` | 修订 `dynamic.tsv`，随后运行 `pnpm install:rime` |

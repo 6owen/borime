@@ -17,7 +17,7 @@ describe('translation diagnostics', () => {
     );
   });
 
-  it('makes cache visibility and latency explicit', () => {
+  it('makes cache visibility, latency, and automatic refresh explicit', () => {
     expect(
       formatDiagnosticEvent({
         timestamp: '2026-08-26T01:00:05.000Z',
@@ -29,9 +29,9 @@ describe('translation diagnostics', () => {
     expect(
       formatDiagnosticEvent({
         timestamp: '2026-08-26T01:00:05.000Z',
-        type: 'cache_written',
+        type: 'candidate_refresh_requested',
       }),
-    ).toContain('retype to refresh');
+    ).toContain('candidate window refresh requested');
   });
 
   it('does not diagnose failures from a previous worker process', () => {

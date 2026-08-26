@@ -10,6 +10,8 @@ export type DiagnosticEventType =
   | 'request_retry'
   | 'request_succeeded'
   | 'cache_written'
+  | 'candidate_refresh_requested'
+  | 'candidate_refresh_failed'
   | 'request_failed';
 
 export interface DiagnosticEvent {
@@ -95,7 +97,11 @@ export function formatDiagnosticEvent(event: DiagnosticEvent): string {
     case 'request_succeeded':
       return `${time} model returned${duration}${texts}`;
     case 'cache_written':
-      return `${time} cache ready${duration}${texts} · retype to refresh the candidate window`;
+      return `${time} cache ready${duration}${texts}`;
+    case 'candidate_refresh_requested':
+      return `${time} candidate window refresh requested${duration}${texts}`;
+    case 'candidate_refresh_failed':
+      return `${time} candidate window refresh unavailable${duration}${texts}`;
     case 'request_failed':
       return `${time} request failed${duration}${texts} · ${event.error ?? 'unknown error'}`;
   }

@@ -36,6 +36,8 @@ function printAssessment(events: DiagnosticEvent[]): void {
   const cached = latestOf(events, 'cache_written');
   const failed = latestOf(events, 'request_failed');
   const retry = latestOf(events, 'request_retry');
+  const refresh = latestOf(events, 'candidate_refresh_requested');
+  const refreshFailed = latestOf(events, 'candidate_refresh_failed');
 
   console.log('\n判断：');
   if (!events.length) {
@@ -50,7 +52,13 @@ function printAssessment(events: DiagnosticEvent[]): void {
     console.log(`- 最近一次模型响应耗时 ${success.durationMs} ms。`);
   }
   if (cached) {
-    console.log('- 最近有翻译写入缓存；已打开的候选窗不会自动刷新，需要重新输入。');
+    if (refresh && refresh.timestamp >= cached.timestamp) {
+      console.log('- 最近有翻译写入缓存，并已请求鼠须管自动刷新候选窗。');
+    } else if (refreshFailed && refreshFailed.timestamp >= cached.timestamp) {
+      console.log('- 最近有翻译写入缓存，但没有可安全刷新的活动中文候选窗，或当前前端不支持自动刷新。');
+    } else {
+      console.log('- 最近有翻译写入缓存，尚未看到候选窗刷新事件。');
+    }
   }
   if (retry && (!cached || retry.timestamp > cached.timestamp)) {
     console.log(`- 最近请求发生过重试：${retry.error ?? '未知错误'}。`);

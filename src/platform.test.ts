@@ -2,7 +2,12 @@ import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { findWeaselDeployer, resolveRimeDirectory } from './platform.js';
+import {
+  findWeaselDeployer,
+  requestCandidateRefresh,
+  resolveRimeDirectory,
+  squirrelExecutable,
+} from './platform.js';
 
 describe('resolveRimeDirectory', () => {
   it('uses the native macOS user directory', () => {
@@ -41,5 +46,44 @@ describe('findWeaselDeployer', () => {
     await expect(
       findWeaselDeployer({ ProgramFiles: directory }),
     ).resolves.toBe(join(install, 'WeaselDeployer.exe'));
+  });
+});
+
+describe('requestCandidateRefresh', () => {
+  it('asks the active Squirrel controller to recompose without typing a key', async () => {
+    const calls: Array<{ executable: string; args: string[] }> = [];
+
+    await expect(
+      requestCandidateRefresh('darwin', async (executable, args) => {
+        calls.push({ executable, args });
+        return { stdout: args[0] === '--getascii' ? 'nascii\n' : '' };
+      }),
+    ).resolves.toBe(true);
+
+    expect(calls).toEqual([
+      { executable: squirrelExecutable, args: ['--getascii'] },
+      { executable: squirrelExecutable, args: ['--nascii'] },
+    ]);
+  });
+
+  it('does not switch the user out of ASCII mode after a delayed response', async () => {
+    const calls: string[][] = [];
+    await expect(
+      requestCandidateRefresh('darwin', async (_executable, args) => {
+        calls.push(args);
+        return { stdout: 'ascii\n' };
+      }),
+    ).resolves.toBe(false);
+    expect(calls).toEqual([['--getascii']]);
+  });
+
+  it('is a no-op on unsupported frontends', async () => {
+    let called = false;
+    await expect(
+      requestCandidateRefresh('win32', async () => {
+        called = true;
+      }),
+    ).resolves.toBe(false);
+    expect(called).toBe(false);
   });
 });

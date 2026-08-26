@@ -1,4 +1,5 @@
 # Rime schema patch: bilingual Chinese-English candidates
+# Shift+space commits the highlighted candidate and its visible English comment.
 # Control+Shift+B toggles between 中文 and 中英 for the current session.
 
 patch:
@@ -13,11 +14,14 @@ patch:
       states: [ 原样, 空格 ]
       reset: 1
 
-  "engine/processors/@before 1": lua_processor@*ascii_spacing_processor
-  "engine/processors/@before 4": lua_processor@*smart_enter
+  # Run before ascii_composer as well as key_binder, so the Shift modifier is
+  # handled as part of this shortcut instead of as an ASCII mode switch.
+  "engine/processors/@before 1": lua_processor@*bilingual_commit_processor
+  "engine/processors/@before 2": lua_processor@*ascii_spacing_processor
+  "engine/processors/@before 5": lua_processor@*smart_enter
   # Run after smart_enter but before librime's built-in selector. The keeper
   # delegates navigation to a native selector and snapshots its actual result.
-  "engine/processors/@before 5": lua_processor@*selection_keeper
+  "engine/processors/@before 6": lua_processor@*selection_keeper
   "engine/translators/+":
     - lua_translator@*mixed_input_translator
   "engine/filters/+":

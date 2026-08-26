@@ -22,7 +22,16 @@ describe('Rime default customization', () => {
 
   it('loads the session-local selection keeper into the active schema', () => {
     expect(flypyCustomization).toContain(
-      '"engine/processors/@before 5": lua_processor@*selection_keeper',
+      '"engine/processors/@before 6": lua_processor@*selection_keeper',
+    );
+  });
+
+  it('loads the Shift+space bilingual commit processor before ascii_composer', () => {
+    expect(flypyCustomization).toContain(
+      '"engine/processors/@before 1": lua_processor@*bilingual_commit_processor',
+    );
+    expect(flypyCustomization).not.toContain(
+      '"editor/bindings/Control+Shift+Return": commit_comment',
     );
   });
 });

@@ -92,13 +92,13 @@ export function getConfig(): AppConfig {
     debounceMs: positiveInteger(process.env.RIME_BILINGUAL_DEBOUNCE_MS, 800),
     timeoutMs: positiveInteger(
       process.env.RIME_BILINGUAL_TIMEOUT_MS,
-      baseURL ? 30_000 : 15_000,
+      15_000,
     ),
     maxOutputTokens: positiveInteger(
       process.env.RIME_BILINGUAL_MAX_OUTPUT_TOKENS,
       baseURL ? 2_048 : 512,
     ),
-    maxRetries: nonNegativeInteger(process.env.RIME_BILINGUAL_MAX_RETRIES, 3),
+    maxRetries: nonNegativeInteger(process.env.RIME_BILINGUAL_MAX_RETRIES, 1),
     retryBaseMs: positiveInteger(
       process.env.RIME_BILINGUAL_RETRY_BASE_MS,
       2_000,

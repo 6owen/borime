@@ -313,7 +313,7 @@ worker 还会验证返回数量、过滤未知 `source`、清理换行和括号�
 
 - 每个候选窗最多 5 个并行单项请求。
 - 防抖：800 ms。
-- 超时：30 秒。
+- 超时：15 秒。
 - 单项最大输出 token：128～512（受环境变量上限约束）。
 
 DeepSeek thinking 在两条 provider 路径中都显式关闭。翻译只需要短 JSON；如果沿用模型默认的 high thinking，内部推理可能独占 2048 个输出 token，使正文为 0 或 JSON 被截断。AI SDK 内建重试设为 0，避免与 worker 的 2／4／8 秒重试叠加。
@@ -327,7 +327,7 @@ DeepSeek thinking 在两条 provider 路径中都显式关闭。翻译只需要�
 3. 更新 `cache.version`。
 4. 提交 `.queue-offset`。
 
-如果超时、模型漏项或结构化输出校验失败，worker 默认进行最多 3 次重试，间隔为 2 秒、4 秒、8 秒。新输入导致的主动取消不属于失败且不会重试。普通失败耗尽重试后，该批次会写入 `failed-requests.jsonl`，随后推进 offset，避免坏批次永久阻塞队列或无限消耗 API。中文输入本身不受影响。
+如果超时、模型漏项或结构化输出校验失败，worker 默认进行最多 1 次重试，等待 2 秒后重试。新输入导致的主动取消不属于失败且不会重试。普通失败耗尽重试后，该批次会写入 `failed-requests.jsonl`，随后推进 offset，避免坏批次永久阻塞队列或无限消耗 API。中文输入本身不受影响。
 
 ## 7. 长句翻译的真实边界
 
@@ -561,9 +561,9 @@ dynamic.tsv 是否出现中文词条
 | `RIME_BILINGUAL_BATCH_SIZE` | 5 | 每次最多翻译的最新候选数 |
 | `RIME_BILINGUAL_POLL_MS` | 250 | worker 空闲轮询周期 |
 | `RIME_BILINGUAL_DEBOUNCE_MS` | 800 | 停止输入后的防抖时间 |
-| `RIME_BILINGUAL_TIMEOUT_MS` | 兼容接口 30000 | 单次模型请求超时 |
+| `RIME_BILINGUAL_TIMEOUT_MS` | 15000 | 单次模型请求超时 |
 | `RIME_BILINGUAL_MAX_OUTPUT_TOKENS` | 兼容接口 2048 | JSON 输出预算 |
-| `RIME_BILINGUAL_MAX_RETRIES` | 3 | 初次失败后的最大重试次数；0 表示不重试 |
+| `RIME_BILINGUAL_MAX_RETRIES` | 1 | 初次失败后的最大重试次数；0 表示不重试 |
 | `RIME_BILINGUAL_RETRY_BASE_MS` | 2000 | 指数退避的初始等待时间 |
 | `RIME_BILINGUAL_QUEUE_MAX_BYTES` | 1048576 | 已完全消费的请求队列压缩阈值 |
 | `RIME_BILINGUAL_LOG_MAX_BYTES` | 1048576 | 单个 worker／死信日志的轮转阈值 |

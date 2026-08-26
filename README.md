@@ -77,7 +77,7 @@ OpenAI 兼容路径只要求普通 `/chat/completions`，不会发送 `response_
 
 翻译任务会显式关闭 DeepSeek thinking。这个任务只需要短 JSON；默认 high thinking 可能耗尽输出 token、导致正文为空或 JSON 被截断。AI SDK 自带重试已关闭，由可观测、可配置的 worker 重试层统一处理。
 
-AI 请求默认在初次失败后最多重试 3 次，采用 2 秒、4 秒、8 秒指数退避；仍失败的批次会写入 `failed-requests.jsonl` 并跳过，不会无限调用接口。可通过 `.env` 中的 `RIME_BILINGUAL_MAX_RETRIES` 调整，设为 `0` 表示不重试。
+AI 请求默认在初次失败后最多重试 1 次，等待 2 秒后重试；仍失败的批次会写入 `failed-requests.jsonl` 并跳过，不会无限调用接口。输入法交互优先快速失败，重新输入仍可再次触发。可通过 `.env` 中的 `RIME_BILINGUAL_MAX_RETRIES` 调整，设为 `0` 表示不重试。
 
 项目随附的 85 条基础翻译位于 `rime/bilingual/seed.tsv`，是首版人工整理，并非从第三方英文词库导入。执行下面的预生成命令时，中文词按雾凇拼音 `cn_dicts/base.dict.yaml` 的权重选取，英文翻译由当前配置的模型生成。
 

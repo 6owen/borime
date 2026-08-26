@@ -37,6 +37,7 @@ export interface AppConfig {
   cursorPath: string;
   queueLockPath: string;
   versionPath: string;
+  aiEnabledPath: string;
   failurePath: string;
   workerLogPath: string;
   workerErrorLogPath: string;
@@ -77,6 +78,7 @@ export function getConfig(): AppConfig {
     cursorPath: join(dataDirectory, '.queue-offset'),
     queueLockPath: join(dataDirectory, '.queue-maintenance'),
     versionPath: join(dataDirectory, 'cache.version'),
+    aiEnabledPath: join(dataDirectory, 'ai.enabled'),
     failurePath: join(dataDirectory, 'failed-requests.jsonl'),
     workerLogPath: join(dataDirectory, 'worker.log'),
     workerErrorLogPath: join(dataDirectory, 'worker.error.log'),

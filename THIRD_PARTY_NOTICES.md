@@ -1,4 +1,17 @@
-# Third-party data notices
+# Third-party notices
+
+## Rime Ice
+
+Borime uses Rime Ice as a Git submodule and includes it in source release
+archives.
+
+- Project: https://github.com/iDvel/rime-ice
+- License: GNU General Public License v3.0
+- License text: `vendor/rime-ice/LICENSE`
+
+Borime's own source files are offered under the repository's MIT license.
+Distributions that include Rime Ice must also preserve its license and comply
+with the applicable GPLv3 terms.
 
 ## CC-CEDICT
 

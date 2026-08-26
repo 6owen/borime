@@ -54,6 +54,7 @@ async function main(): Promise<void> {
   console.log(`Flypy schema installed: ${await exists(join(config.rimeDirectory, 'double_pinyin_flypy.schema.yaml'))}`);
   console.log(`Bilingual patch installed: ${await exists(join(config.rimeDirectory, 'lua', 'bilingual_filter.lua'))}`);
   console.log(`Translation API key configured: ${Boolean(config.apiKey)}`);
+  console.log(`AI candidate requests enabled: ${await exists(config.aiEnabledPath)}`);
   console.log(`API mode: ${config.baseURL ? 'OpenAI-compatible' : 'DeepSeek official'}`);
   console.log(`Translation model: ${config.model}`);
   console.log(`Effective cached translations: ${translations.size}`);

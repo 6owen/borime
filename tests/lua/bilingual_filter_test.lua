@@ -11,6 +11,7 @@ local function write(name, content)
 end
 
 write("cache.version", "1\n")
+write("ai.enabled", "enabled\n")
 write("cedict.tsv", "法医\tforensic pathologist; forensic doctor; medical examiner\n")
 write("seed.tsv", "例如\tfor example\n")
 write("dynamic.tsv", "利刃\tsharp blade\n")
@@ -33,6 +34,7 @@ local env = { engine = { schema = { config = config } } }
 filter.init(env)
 assert(dictionary_opens == 1, "dictionary must load once during init")
 assert(env.queue_lock_path == root .. "/bilingual/.queue-maintenance", "queue maintenance lock path must be configured")
+assert(env.ai_enabled, "the installer marker must enable AI candidate requests")
 
 write("cache.version", "2\n")
 filter._reload_cache(env)
@@ -94,6 +96,27 @@ assert(
   "semantic comment properties must request one UI-only redraw"
 )
 
+local queue_before_disabled = queued_snapshot
+yielded = {}
+env.ai_enabled = false
+env.engine.context.input = "bukeyong"
+local disabled_candidate = { type = "phrase", text = "不可用", comment = "" }
+filter.func({ iter = function()
+  local emitted = false
+  return function()
+    if emitted then return nil end
+    emitted = true
+    return disabled_candidate
+  end
+end }, env)
+local disabled_queue = assert(original_open(root .. "/bilingual/requests.txt", "r"))
+local queue_after_disabled = disabled_queue:read("*a")
+disabled_queue:close()
+assert(queue_after_disabled == queue_before_disabled, "disabled AI must not queue candidate text")
+assert(yielded[1] == disabled_candidate, "disabled AI must preserve an untranslated candidate")
+assert(yielded[1].comment == "", "disabled AI must not show a pending translation")
+env.ai_enabled = true
+
 assert(filter._encode_indices({ 0, 2 }, 100000) == "0,2,100000")
 
 yielded = {}
@@ -112,11 +135,11 @@ end }, env)
 assert(yielded[1].comment == "sharp blade", "AI text must not contain an AI prefix")
 assert(yielded[2].comment == "for example", "preset text must remain unchanged")
 assert(
-  env.engine.context.properties._comment_highlight == "0,100000",
+  env.engine.context.properties._comment_highlight == "0,100001",
   "cached AI translations must use Squirrel's accent comment color"
 )
 assert(
-  env.engine.context.properties._comment_warning == "100002",
+  env.engine.context.properties._comment_warning == "100003",
   "a new snapshot must clear stale warning rows"
 )
 

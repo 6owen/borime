@@ -1,279 +1,379 @@
-# Rime Bilingual IME
+# Borime
 
-鼠须管／小狼毫 + 雾凇小鹤双拼的中英候选扩展。候选命中本地缓存时，英文只显示在候选提示中：
+[![CI](https://github.com/6owen/borime/actions/workflows/ci.yml/badge.svg)](https://github.com/6owen/borime/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-想系统理解词库、Rime 用户词频、Lua filter、DeepSeek sidecar 和缓存一致性，请阅读[系统心智模型与架构说明](docs/ARCHITECTURE.zh-CN.md)。准备继续开发、公开分享或增加设置 UI 时，请阅读[项目目录、个人配置与产品化组织](docs/PROJECT-ORGANIZATION.zh-CN.md)。
+Borime 是一套基于 [Rime](https://rime.im/) 的中英双语输入方案：使用雾凇拼音的小鹤双拼生成中文候选，在候选旁显示英文释义，并用异步 AI 为本地词典没有覆盖的短语补全翻译。
 
 ```text
 我的帽子  my hat
 ```
 
-按空格确认时只上屏 `我的帽子`，英文不会进入正文。
+英文只显示在候选注释中。按空格确认后，上屏内容仍然只有 `我的帽子`。
 
-## 项目位置、配置位置与修改后如何生效
+> 当前主要在 macOS 鼠须管上使用和验证；Windows 小狼毫的安装链路已有自动化测试，但仍需要更多实机反馈。
 
-### 源码与运行目录
+## 功能
 
-项目真源位于：
+- **雾凇拼音 + 小鹤双拼**：使用 rime-ice 的词库、Emoji、用户词频学习等能力。
+- **中英候选注释**：候选正文保持中文，英文作为 comment 展示，不污染上屏文本。
+- **三层翻译来源**：CC-CEDICT、本地精选词条和 AI 动态缓存按优先级合并。
+- **异步 AI 翻译**：网络请求在独立 Node.js worker 中运行，Rime 按键线程不等待网络。
+- **当前候选立即刷新**：macOS 上 AI 返回后自动更新候选窗，并保留用户已经选择的页码和候选位置。
+- **中英混输**：支持“小鹤双拼中文前缀 + 英文”，例如 `dakdapp` 可产生 `打开 APP`。
+- **自动空格**：在中文与 ASCII 字母数字的边界自动补半角空格。
+- **智能回车**：未移动候选时回车上屏原始编码；移动候选后回车确认当前高亮项。
+- **诊断与缓存工具**：提供状态检查、实时诊断、模型探针、缓存导入导出和发行包构建命令。
+- **不占用 VS Code 终端快捷键**：`Control+grave` 留给宿主应用，Rime 方案菜单使用 `F4` 或 `Control+Shift+grave`。
 
-```text
-/Users/wangwenbo/Desktop/Demo/rime-bilingual-ime
-```
-
-所有需要长期保留、提交 Git 或分享给其他人的功能都应在这个仓库中修改。不要把 `~/Library/Rime` 当作源码目录：它是鼠须管的部署目录和个人数据库，仓库中的配置经安装器复制到那里。
-
-```text
-Git 仓库                               本机运行目录
-rime/ + vendor/rime-ice  ──部署──▶    ~/Library/Rime
-src/*.ts                ──构建──▶    dist/*.js ──▶ AI Worker
-.env                    ──读取──▶    本机 AI 配置
-                                      *.userdb / bilingual/*
-                                      由运行时自动维护
-```
-
-macOS 后台服务定义位于：
+## 工作方式
 
 ```text
-~/Library/LaunchAgents/com.local.rime-bilingual.plist
+键盘输入
+  → Squirrel / Weasel + librime
+  → 雾凇中文候选
+  → Lua 添加本地英文注释
+  → 缓存未命中时写入请求队列
+  → Node.js worker 调用 DeepSeek / OpenAI-compatible API
+  → 写入本地缓存并刷新候选
 ```
 
-它启动仓库中的 `dist/worker.js`，因此移动仓库后必须重新执行 `pnpm install:rime`，使后台服务指向新位置。
+中文候选排序仍由雾凇词库和 Rime userdb 决定；AI 只负责英文注释，不会重排或替换中文候选。
 
-### 功能应该在哪里修改
+## 支持范围与环境要求
 
-| 想修改的功能 | 源码位置 |
-|---|---|
-| 英文翻译的显示、候选数量和 `翻译中…` | `rime/lua/bilingual_filter.lua` |
-| `dakdapp → 打开 APP` 中英混输 | `rime/lua/mixed_input_translator.lua` |
-| 中英文自动空格 | `rime/lua/mixed_spacing_filter.lua`、`rime/lua/ascii_spacing_processor.lua` |
-| 回车确认候选或输入原始拼音 | `rime/lua/smart_enter.lua` |
-| AI 刷新后保留当前候选位置 | `rime/lua/selection_keeper.lua` |
-| 方案菜单、开关、快捷键、固定候选、候选数量 | `rime/default.custom.yaml`、`rime/double_pinyin_flypy.custom.yaml` |
-| 候选窗颜色与样式 | `rime/squirrel.custom.yaml` |
-| AI prompt 和模型调用 | `src/translator.ts` |
-| AI 队列、取消、缓存与优先级 | `src/worker.ts` |
-| 防抖与请求调度 | `src/debounce.ts`、`src/preemption.ts` |
-| 本机配置读取 | `src/config.ts` |
-| macOS/Windows 安装与后台任务 | `src/install-rime.ts`、`src/platform.ts` |
+| 平台 | Rime 前端 | 当前状态 | AI 返回后的候选刷新 |
+| --- | --- | --- | --- |
+| macOS | 鼠须管 Squirrel | 主要开发和实机验证平台 | 立即刷新并恢复原候选位置 |
+| Windows | 小狼毫 Weasel | 安装与核心逻辑有 CI，仍需更多实机反馈 | 下一次正常候选重算时显示 |
+| Linux / 移动端 | — | 暂不支持安装 | — |
 
-以下目录不是源码真源，不应直接维护：
+当前只部署雾凇的 `double_pinyin_flypy`（小鹤双拼）方案，不包含全拼和其他双拼方案的 Borime 集成配置。
+项目暂未维护精确的最低 Squirrel／Weasel 版本；请优先使用官方最新 Release，过旧或不含 librime-lua 的前端无法加载本项目 Lua 组件。
 
-- `dist/` 是 TypeScript 编译产物。
-- `vendor/rime-ice/` 是雾凇拼音 Git submodule，通常通过更新 submodule 升级，不直接混入个人修改。
-- `~/Library/Rime/build/` 是 Rime 编译产物。
-- `~/Library/Rime` 中已部署的 Lua/YAML 会在下次安装时被仓库版本覆盖。
+安装前需要：
 
-### 本机配置和个人数据在哪里
+- [Git](https://git-scm.com/)
+- Node.js 22 或更高版本
+- pnpm 10；项目声明的准确版本为 `10.13.1`
+- macOS：[鼠须管 Releases](https://github.com/rime/squirrel/releases)
+- Windows：[小狼毫 Releases](https://github.com/rime/weasel/releases)
+- 可选：DeepSeek API Key 或 OpenAI-compatible API
 
-AI 本机配置位于仓库根目录的 `.env`，包括 API Base URL、API Key、模型、超时、防抖和重试次数。`.env` 已被 Git 忽略，但仍是本机明文文件，不得上传或放入发行包。
+先安装对应 Rime 前端，并确认系统输入法列表中可以切换到鼠须管／小狼毫。macOS 如果安装后没有自动出现鼠须管，需要在“系统设置 → 键盘 → 输入法”中手动添加；部分 Mac 键盘打开方案菜单时需要按 `Fn+F4`。
 
-Rime 个人数据位于：
+AI 配置不是中文输入的前提。没有 API Key 时，Rime、随项目附带的翻译和已经导入的 CC-CEDICT 仍可使用，但不会为新短语生成 AI 翻译。
 
-```text
-~/Library/Rime/
-├── rime_ice.userdb/             # 中文个人词频
-├── melt_eng.userdb/             # 英文用户数据
-└── bilingual/
-    ├── dynamic.tsv              # AI 翻译缓存
-    ├── requests.txt             # 请求历史
-    ├── diagnostics.jsonl        # 诊断事件
-    └── failed-requests.jsonl
-```
+## 安装
 
-这些数据不进入 Git 仓库，安装和升级时应当保留。当前还没有统一的 `settings.json` 或设置 UI；`rime/*.custom.yaml` 中既有产品默认配置，也有少量个人规则。未来的配置分层方案见[项目目录、个人配置与产品化组织](docs/PROJECT-ORGANIZATION.zh-CN.md)。
+### 1. 获取代码与依赖
 
-### 修改后如何在本机生效
-
-TypeScript 的运行链路是：
-
-```text
-src/*.ts → pnpm build → dist/*.js → 重启 LaunchAgent
-```
-
-只修改 TypeScript 时执行：
+在 macOS Terminal 或 Windows PowerShell 中执行：
 
 ```bash
-cd /Users/wangwenbo/Desktop/Demo/rime-bilingual-ime
-pnpm check
-pnpm test
-pnpm build
-launchctl kickstart -k gui/$(id -u)/com.local.rime-bilingual
-```
-
-Rime 的运行链路是：
-
-```text
-仓库 rime/ + vendor/rime-ice
-        → pnpm install:rime
-        → ~/Library/Rime
-        → 鼠须管重新部署并生成 build/
-```
-
-修改 Lua、YAML、快捷键或候选样式时执行：
-
-```bash
-cd /Users/wangwenbo/Desktop/Demo/rime-bilingual-ime
-pnpm test
-pnpm install:rime
-```
-
-修改 `.env` 后不需要重建 Rime，只需重启 AI Worker：
-
-```bash
-launchctl kickstart -k gui/$(id -u)/com.local.rime-bilingual
-```
-
-如果不想区分修改类型，可以使用完整流程：
-
-```bash
-cd /Users/wangwenbo/Desktop/Demo/rime-bilingual-ime
-pnpm check
-pnpm test
-pnpm build
-pnpm install:rime
-pnpm diagnose
-```
-
-不要在 LaunchAgent 正常运行时另外执行 `pnpm worker`，否则会同时出现两个 Worker，争用同一个请求队列。
-
-前 5 个候选的缓存缺失项会按当前排名写成一个队列快照；停止输入约 200 毫秒后，Node.js sidecar 只处理最新快照。OpenAI-compatible 接口会并行翻译每个候选，第一候选完成后立即写入缓存并刷新，其他候选无需阻塞它。新输入出现时，正在进行的旧模型请求会在约一个轮询周期内取消；被取消批次的第一候选进入内存补偿队列，等输入空闲后补翻译。Rime 的按键线程从不等待网络。
-
-## 获取代码
-
-```bash
-git clone --recurse-submodules <repository-url> rime-bilingual-ime
-cd rime-bilingual-ime
+git clone --recurse-submodules https://github.com/6owen/borime.git
+cd borime
+corepack enable
+pnpm --version
 pnpm install --frozen-lockfile
-cp .env.example .env
 ```
 
-需要 Node.js 22 或更高版本、pnpm 10，以及已经安装好的 Rime 前端：macOS 使用鼠须管 Squirrel，Windows 使用小狼毫 Weasel。API Key 只写在每台机器自己的 `.env`，不得提交到 Git。
+`pnpm --version` 应显示 10.x；Corepack 会依据 `package.json` 使用 `10.13.1`。如果 Node 发行版没有附带 Corepack，可改用：
 
-如果克隆时漏了 submodule：
+```bash
+npm install --global pnpm@10.13.1
+```
+
+如果克隆时没有拉取 submodule：
 
 ```bash
 git submodule update --init --recursive
 ```
 
-## macOS 安装
+### 2. 选择是否启用 AI
 
-```bash
-pnpm build
-pnpm install:rime
-```
+不需要 AI 时可以完全跳过本步骤，不创建 `.env`。worker 没有 API Key 就不会发起模型请求。
 
-安装器会部署到 `~/Library/Rime`、注册 LaunchAgent、重载鼠须管。之后选择“小鹤双拼”。
+启用 AI 后，当前候选窗前 5 项中本地未命中的中文候选会自动发送给所配置的模型服务，并可能产生 API 费用；完整范围见[数据、隐私与同步](#数据隐私与同步)。
 
-## Windows 安装
-
-在 PowerShell 中执行相同命令：
-
-```powershell
-pnpm build
-pnpm install:rime
-```
-
-安装器会部署到 `%AppData%\Rime`，查找 `WeaselDeployer.exe`，注册当前用户登录时启动的 `RimeBilingualIME` 计划任务，并重新部署小狼毫。如果小狼毫安装在非标准目录，在 `.env` 设置：
-
-```env
-RIME_DEPLOYER_PATH=C:\Path\To\WeaselDeployer.exe
-```
-
-Windows 安装逻辑已有单元测试和 CI 配置，但尚未在你的 Windows 实机上完成首次验证；第一次安装建议保留安装器自动生成的 Rime 目录备份。
-
-## 发行包
-
-```bash
-pnpm package:release
-```
-
-产物位于 `.release/`，包括 ZIP 和 SHA-256 校验文件。ZIP 内会展开雾凇词库并包含 macOS／Windows 安装代码，但不会包含 `.env`、API Key、个人 userdb、AI 动态缓存、请求队列或日志。
-
-默认显示英文候选提示；按 `Control+Shift+B` 或在方案菜单中选择“中文”可以临时隐藏英文提示。
-
-## DeepSeek
+macOS 创建配置：
 
 ```bash
 cp .env.example .env
 ```
 
-只在本机编辑 `.env`。可以填写官方 DeepSeek 的 `DEEPSEEK_API_KEY`，也可以使用 `OPENAI_BASE_URL`、`OPENAI_API_KEY` 和 `MASTRA_CHAT_MODEL` 接入 OpenAI 兼容服务；兼容服务配置优先。不要把 key 写入 Rime 的 Lua/YAML。sidecar 会自动处理未命中的候选。
+Windows PowerShell 创建配置：
 
-OpenAI 兼容路径只要求普通 `/chat/completions`，不会发送 `response_format`；模型返回的 JSON 文本由本地 Zod 校验。因此 curl 能调用、但不支持 `json_schema`／`json_object` 的兼容接口也可以使用。
+```powershell
+Copy-Item .env.example .env
+```
 
-翻译任务会显式关闭 DeepSeek thinking。这个任务只需要短 JSON；默认 high thinking 可能耗尽输出 token、导致正文为空或 JSON 被截断。AI SDK 自带重试已关闭，由可观测、可配置的 worker 重试层统一处理。
+使用官方 DeepSeek：
 
-AI 请求默认在初次失败后最多重试 1 次，等待 2 秒后重试；仍失败的批次会写入 `failed-requests.jsonl` 并跳过，不会无限调用接口。输入法交互优先快速失败，重新输入仍可再次触发。可通过 `.env` 中的 `RIME_BILINGUAL_MAX_RETRIES` 调整，设为 `0` 表示不重试。
+```env
+DEEPSEEK_API_KEY=your-api-key
+DEEPSEEK_MODEL=deepseek-v4-flash
+```
 
-项目随附的 85 条基础翻译位于 `rime/bilingual/seed.tsv`，是首版人工整理，并非从第三方英文词库导入。执行下面的预生成命令时，中文词按雾凇拼音 `cn_dicts/base.dict.yaml` 的权重选取，英文翻译由当前配置的模型生成。
+或使用 OpenAI-compatible 接口：
 
-也可以导入 GitHub 上自动更新的 CC-CEDICT 中英词典：
+```env
+OPENAI_BASE_URL=https://api.example.com/v1
+OPENAI_API_KEY=your-api-key
+MASTRA_CHAT_MODEL=your-model-id
+```
+
+存在 `OPENAI_BASE_URL` 时，兼容接口配置优先。API Key 只保存在本机明文 `.env`；该文件会设置为仅当前用户可读，并已被 Git 和发行包排除。
+
+### 3. macOS 部署
+
+在 Terminal 中执行：
+
+```bash
+pnpm build
+pnpm install:rime
+pnpm status
+```
+
+切换系统输入法到鼠须管，然后按 `F4`（部分键盘为 `Fn+F4`），在 Rime 方案菜单中选择 **小鹤双拼**。
+
+### 4. Windows 部署
+
+在 PowerShell 中执行：
+
+```powershell
+pnpm build
+pnpm install:rime
+pnpm status
+```
+
+切换系统输入法到小狼毫，然后从小狼毫方案菜单中选择 **小鹤双拼**。
+
+如果安装器找不到 `WeaselDeployer.exe`，在 `.env` 中指定：
+
+```env
+RIME_DEPLOYER_PATH=C:\Path\To\WeaselDeployer.exe
+```
+
+Windows 当前不会在 AI 返回时主动重算正在显示的候选；新翻译会在下一次输入、退格或其他正常候选重算时出现。
+
+### 5. 验证安装
+
+`pnpm status` 应显示 Rime 前端、Flypy schema、Bilingual patch 和后台 worker 状态。切换到小鹤双拼后：
+
+1. 正常输入中文，确认中文候选可以上屏。
+2. 候选旁应出现已有英文释义；缓存未命中且配置了 API Key 时会先显示 `翻译中…`。
+3. macOS 上等待 AI 返回，英文应自动出现；按 Down 移动过的高亮不应跳回第一项。
+
+无 Key 安装仍会注册一个空闲的后台任务，方便以后直接补配置；此时 `pnpm status` 应显示 `Translation API key configured: false` 和 `AI candidate requests enabled: false`，不会产生模型请求。
+
+安装器会把雾凇方案和 Borime 的 Lua/YAML 部署到 Rime 用户目录，注册后台任务并重新部署前端。首次检测到已有 Rime 用户目录时，会在其同级创建 `Rime.backup-<timestamp>` 完整备份；后续升级保留 userdb、AI 缓存和队列，但更新仓库管理的 Lua/YAML。
+
+> macOS LaunchAgent 和 Windows 计划任务直接运行当前仓库中的 `dist/worker.js`，因此安装后不能直接移动或删除源码目录。移动目录后应在新位置重新执行 `pnpm build` 和 `pnpm install:rime`。
+
+## 使用
+
+### 候选翻译
+
+默认启用中英候选。已有本地翻译会立即显示；新词先显示 `翻译中…`，AI 返回后写入本地缓存。
+
+macOS 上，当前候选窗会立即刷新。如果你已经按 Down、Up 或翻页键移动高亮，刷新后仍保持同一绝对候选位置；只有输入编码、光标位置或该候选正文已经变化时才放弃恢复。
+
+### 快捷键
+
+| 快捷键 | 功能 |
+| --- | --- |
+| `Control+Shift+B` | 切换“中文 / 中英”候选注释 |
+| `Control+Shift+M` | 切换“单语 / 混输” |
+| `Control+Shift+S` | 切换“原样 / 自动空格” |
+| `F4` 或 `Control+Shift+grave` | 打开 Rime 方案菜单 |
+| `Control+grave` | 不由 Borime 占用，可用于 VS Code 集成终端 |
+
+`grave` 指常见美式键盘中数字 1 左侧的反引号键，不同键盘布局可能位于其他位置。中英候选、混输和自动空格默认都开启；这些开关只在当前 Rime 会话有效，切换方案或重新部署后会回到默认状态。
+
+### 中英混输
+
+连续输入精确命中的“小鹤双拼中文前缀 + 英文词”会生成混输候选。例如：
+
+```text
+dakdapp → 打开 APP
+```
+
+### 自动空格
+
+同一候选及相邻 Rime 上屏记录中的中文／ASCII 字母数字边界会自动补一个半角空格，例如：
+
+```text
+打开APP设置 → 打开 APP 设置
+```
+
+手动移动光标、粘贴文本或切换到其他输入法后，Rime 无法可靠读取应用光标前的字符，因此这些场景不会保证自动补空格。
+
+### 回车与中英文切换
+
+- 未用方向键移动候选时，`Return` 上屏原始拼音编码。
+- 移动过候选后，`Return` 确认当前高亮候选。
+- 中文组合状态下按 Caps Lock 或左右 Shift，会提交当前原始编码并切换到英文模式。
+
+## 翻译数据
+
+翻译按以下优先级覆盖：
+
+```text
+CC-CEDICT < seed.tsv < dynamic.tsv
+```
+
+| 数据 | 位置 | 说明 |
+| --- | --- | --- |
+| CC-CEDICT | Rime 用户目录下的 `bilingual/cedict.tsv` | 可选的大型基础中英词典 |
+| 精选翻译 | Rime 用户目录下的 `bilingual/seed.tsv` | 首次安装由仓库 `rime/bilingual/seed.tsv` 初始化，可继续预生成 |
+| AI 缓存 | Rime 用户目录下的 `bilingual/dynamic.tsv` | 自动生成，也可人工修订 |
+
+不要在 worker 运行时直接编辑 `dynamic.tsv`：worker 的内存缓存可能在下一次写回时覆盖手工修改。先停止后台任务，完成编辑后再运行 `pnpm install:rime` 重新加载。
+
+导入 CC-CEDICT：
 
 ```bash
 pnpm import:cedict
 ```
 
-导入器使用 `qundao/backup-cc-cedict` 镜像，生成文件位于 Rime 用户目录下的 `bilingual/cedict.tsv`，导入完成后会自动重载鼠须管或小狼毫。CC-CEDICT 数据遵循 CC BY-SA 4.0，归属与转换说明见 `THIRD_PARTY_NOTICES.md`。人工种子和 AI 动态缓存的优先级高于 CC-CEDICT。
+该命令联网下载词典，将结果写入 Rime 用户目录的 `bilingual/cedict.tsv`，然后重启 worker 并重新部署 Rime；不调用 AI。CC-CEDICT 数据遵循 CC BY-SA 4.0，归属与转换说明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
-预生成更多常用词：
+预生成更多常见词翻译：
 
 ```bash
 pnpm seed -- --count 2000
 ```
 
-生成过程中会逐批保存，重复执行会跳过已有翻译。
+`seed` 会把雾凇基础词库中的常用中文发送给当前模型，产生真实 API 调用和费用，并把结果直接写入 Rime 用户目录的 `bilingual/seed.tsv`。它会跳过已经存在的翻译、分批保存并递增 `cache.version`；不需要重新部署，重新输入或触发下一次候选重算即可生效。运行 `pnpm status` 可以确认精选翻译和总缓存数量已经增加。
 
-## AI 翻译诊断
-
-查看最近候选是否入队、防抖是否被后续输入打断、模型调用耗时、重试、失败和缓存写入：
+## 状态与诊断
 
 ```bash
+# 查看 Rime、worker、模型配置和缓存状态
+pnpm status
+
+# 查看最近的候选入队、模型请求、缓存写入和刷新事件
 pnpm diagnose
-```
 
-边打字边观察完整链路：
-
-```bash
+# 持续观察
 pnpm diagnose -- --watch
-```
 
-绕过 Rime 和队列，直接测试当前模型/API 的响应时间：
-
-```bash
+# 绕过 Rime，发起一次真实 API 请求
 pnpm diagnose -- --probe "诊断翻译延迟"
 ```
 
-探针会产生一次真实 API 请求。结构化事件保存在 Rime 用户目录的
-`bilingual/diagnostics.jsonl`，包含输入过的候选文字，文件权限仅限当前用户，且不会进入发行包。
-macOS 上 AI 写入缓存后，sidecar 会通过鼠须管的分布式通知通道请求活动 composition 重新计算；诊断会依次出现 `cache ready` 与 `candidate window refresh requested`，无需删除或重新输入字符。刷新在独立的合并队列中执行，300 ms 内没有活动鼠须管 controller 就放弃，不会阻塞后续翻译。Windows 当前仍在下一次候选重算时读取新缓存。
+探针会产生真实 API 调用。诊断数据保存在 Rime 用户目录的 `bilingual/diagnostics.jsonl`，其中可能包含你输入过的候选文字。
 
-## 行为边界
+不要在已安装的后台 worker 运行时另外执行 `pnpm worker`，否则两个进程会争用同一个请求队列。
 
-- 初始词表和已缓存词会立即在候选注释中显示英文，但始终只上屏中文。
-- 新词第一次出现时显示琥珀色的 `翻译中…`；macOS sidecar 完成后自动刷新，并在输入编码和候选正文未变化时恢复刷新前的候选绝对索引。nightly Squirrel 用浅蓝色 comment 标记非高亮的 AI 缓存，词典／预置翻译保持灰色；当前高亮行统一使用深蓝 comment 以保证可读性。候选不再占用字符显示 `AI` 前缀；旧版前端忽略语义颜色但仍正常显示英文。
-- 纯中文模式不会创建翻译请求。
-- 动态缓存位于 Rime 用户目录下的 `bilingual/dynamic.tsv`，可以私下备份或人工修订，不应提交到公开仓库。
-- 英文注释最多显示 42 个 Unicode 字符，超长词典释义以省略号收尾；缓存仍保留完整值。
-- 未移动候选时按 `Return` 上屏原始拼音；用上下／翻页键移动过候选后，`Return` 确认当前高亮候选。
-- 在中文组合状态按 `Caps Lock / 中英`，会提交当前原始拼音并切换为英文模式；左右 `Shift` 也保留相同行为。再次按对应切换键可切回中文。
-- 连续输入精确命中的“小鹤双拼中文前缀 + 英文词”会产生混输候选，例如 `dakdapp`（`dakd` = 打开）产生 `打开 APP`。按 `Control+Shift+M` 可临时关闭。
-- 同一候选及相邻 Rime 上屏记录中的 CJK／ASCII 字母数字边界会自动补一个半角空格，例如 `打开APP设置` → `打开 APP 设置`。按 `Control+Shift+S` 可临时关闭。
-- 自动空格也覆盖从中文切到 ASCII 模式后输入的第一个英文字符，但只能利用 Rime 自己的提交历史；手动移动光标、粘贴文本或在其他输入法中输入后，它无法可靠读取应用光标前的字符。
-- 中文候选学习由 Rime userdb 按方案和编码路径记录。小鹤双拼中“有/又”的标准码是 `yz`；输入全拼式的 `you` 不等同于 `yz` 的个人词频路径，Emoji 滤镜还可能额外插入一个同字候选。
+## 数据、隐私与同步
 
-## 多机器同步
-
-- GitHub 仓库同步代码、Lua、YAML 和安装脚本。
-- Rime 自带的“用户资料同步”同步中文个人词频和造词记录；每台机器配置不同的 `installation_id`，让 `sync_dir` 指向同一个私有云盘目录。
-- `dynamic.tsv` 是私人 AI 翻译缓存，Rime 默认不会同步 TSV；需要时单独通过私有云盘或备份脚本复制。
-- `cedict.tsv` 可以在每台机器重新执行 `pnpm import:cedict` 生成，不必同步。
-- `.env` 和 API Key 必须逐台配置。
+- `.env`、API Key、userdb、AI 缓存、请求队列和日志不会进入 Git 或发行包。
+- 开启中英候选时，当前候选窗前 5 项中“含汉字且本地缓存未命中”的候选正文会进入队列；它们可能并不是你最终确认上屏的文字。
+- 模型请求只包含这些候选正文和 Borime 的翻译提示词，不包含原始双拼编码、应用全文或光标前后文。服务商仍会收到普通 HTTP 连接元数据；其保留和训练政策由对应服务商决定。
+- 任意 OpenAI-compatible 地址都能同时收到候选文字和为它配置的 API Key。不要用不受信任的接口处理敏感输入。
+- macOS 数据通常位于 `~/Library/Rime`，Windows 通常位于 `%APPDATA%\Rime`。
+- Rime userdb 保存中文选词习惯；`dynamic.tsv` 保存英文翻译缓存，两者需要分别备份。
+- `cedict.tsv` 可在每台机器重新导入，不必同步。
+- 请求队列、诊断和日志是本机明文文件，可能包含候选文字。默认上限为约 1 MiB；日志保留最多两份轮转备份，已消费队列达到上限后会压缩。
+- `Control+Shift+B` 切到“中文”后，会同时停止英文展示和新的 AI 入队；方案重载后默认重新开启。
 
 显式导出和合并 AI 缓存：
 
 ```bash
-pnpm cache:export -- --output /private/path/rime-ai-cache.tsv
-pnpm cache:import -- --input /private/path/rime-ai-cache.tsv
+pnpm cache:export -- --output /private/path/borime-cache.tsv
+pnpm cache:import -- --input /private/path/borime-cache.tsv
 ```
 
-导入采用合并语义，同名词条以导入文件为准；它不会覆盖整份本机缓存，也不会处理个人中文词频。
+Windows PowerShell 可将 `/private/path/borime-cache.tsv` 替换为例如 `$HOME\Documents\borime-cache.tsv`。导出的 TSV 可能包含私人短语，应只保存到可信位置。
+
+### 停用 AI
+
+临时停用：按 `Control+Shift+B` 切到“中文”，当前 session 不再创建新请求。
+
+长期停用：删除 `.env` 中的 `DEEPSEEK_API_KEY` / `OPENAI_API_KEY`，然后重新运行 `pnpm install:rime`。安装器会删除运行时的 `ai.enabled` 标记；Lua 不再显示 `翻译中…` 或写入 AI 请求，但本地中文输入和已有翻译不受影响。
+
+如需清除历史记录，先停用后台 worker，再在文件管理器中检查并删除 Rime 用户目录 `bilingual/` 下对应的 `requests.txt`、`diagnostics.jsonl`、`failed-requests.jsonl`、`worker*.log` 或 `dynamic.tsv`。删除 `dynamic.tsv` 会永久丢失 AI 翻译缓存，请先备份。
+
+## 后台任务、回滚与卸载
+
+修改 `.env` 后应重新执行 `pnpm install:rime`，让 API 开关、后台任务和 Rime session 一起更新。只修改模型参数且不改变是否存在 API Key 时，也可以单独重启 worker：
+
+macOS：
+
+```bash
+launchctl kickstart -k gui/$(id -u)/com.local.rime-bilingual
+```
+
+Windows PowerShell：
+
+```powershell
+Stop-ScheduledTask -TaskName RimeBilingualIME -ErrorAction SilentlyContinue
+Start-ScheduledTask -TaskName RimeBilingualIME
+```
+
+停止并注销 Borime 后台任务：
+
+```bash
+# macOS
+launchctl bootout gui/$(id -u)/com.local.rime-bilingual
+```
+
+macOS 还应通过 Finder 删除 `~/Library/LaunchAgents/com.local.rime-bilingual.plist`，避免下次登录再次加载。
+
+```powershell
+# Windows PowerShell
+Unregister-ScheduledTask -TaskName RimeBilingualIME -Confirm:$false
+```
+
+这不会自动删除 Rime 用户数据。要回滚首次安装，请先备份当前 userdb 和 `bilingual/`，停止对应输入法前端，再通过文件管理器用安装器创建的 `Rime.backup-<timestamp>` 恢复 Rime 用户目录。确认后台任务已注销后，源码目录才可以安全移动或删除。
+
+## 更新与开发
+
+更新代码并重新部署：
+
+```bash
+git pull --recurse-submodules
+pnpm install --frozen-lockfile
+pnpm check
+pnpm test
+pnpm build
+pnpm install:rime
+```
+
+常用源码位置：
+
+| 功能 | 位置 |
+| --- | --- |
+| 候选英文注释与请求入队 | `rime/lua/bilingual_filter.lua` |
+| AI 刷新后恢复候选位置 | `rime/lua/selection_keeper.lua` |
+| 中英混输与自动空格 | `rime/lua/mixed_input_translator.lua`、`rime/lua/mixed_spacing_filter.lua` |
+| AI worker 与模型调用 | `src/worker.ts`、`src/translator.ts` |
+| 安装与平台适配 | `src/install-rime.ts`、`src/platform.ts` |
+
+完整设计说明：
+
+- [系统架构与心智模型](ai-docs/ARCHITECTURE.zh-CN.md)
+- [项目目录与产品化组织](ai-docs/PROJECT-ORGANIZATION.zh-CN.md)
+- [输入体验与候选排序路线图](ai-docs/roadmap/input-experience-and-candidate-ranking.md)
+- [AI 刷新时保留候选位置规格](ai-docs/spec/candidate-selection-preserving-ai-refresh.md)
+
+生成可分发 ZIP 和 SHA-256：
+
+```bash
+pnpm package:release
+```
+
+欢迎提交 Issue 和 Pull Request。提交前请运行：
+
+```bash
+pnpm check
+pnpm test
+```
+
+完整 Lua 测试需要安装 LuaJIT。Windows 没有 LuaJIT 时至少运行 `pnpm check && pnpm test:ts`；CI 会在 macOS 上执行 Lua 测试。
+
+## 许可证
+
+Borime 自身代码使用 [MIT License](LICENSE)。雾凇拼音、CC-CEDICT 及其他第三方内容继续遵循各自许可证，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

@@ -5,10 +5,10 @@
 当前系统主要涉及两个目录，但它们不是两份需要合并的源码：
 
 ```text
-/Users/wangwenbo/Desktop/Demo/rime-bilingual-ime
+/path/to/borime
     产品真源：源码、测试、安装器和当前正在运行的 AI worker
 
-/Users/wangwenbo/Library/Rime
+~/Library/Rime
     Rime 运行目录：已部署配置、编译产物、个人词频和翻译运行数据
 ```
 
@@ -112,6 +112,7 @@ Windows 对应 `%AppData%` 或 `%LocalAppData%` 下的产品目录。配置可�
 ├── melt_eng.userdb/          # 英文用户词典数据
 └── bilingual/
     ├── dynamic.tsv           # AI 翻译缓存
+    ├── ai.enabled            # 安装器根据 API Key 管理的请求开关
     ├── requests.txt          # 候选请求队列
     ├── diagnostics.jsonl     # 诊断事件，包含候选文字
     ├── failed-requests.jsonl
@@ -131,7 +132,7 @@ Windows 对应 `%AppData%` 或 `%LocalAppData%` 下的产品目录。配置可�
 现阶段不需要为了形式立刻拆 monorepo。等 UI 开始开发后，可以逐步演进为：
 
 ```text
-rime-bilingual-ime/
+borime/
 ├── apps/
 │   └── desktop/                 # 设置窗口、托盘和安装体验
 ├── packages/
@@ -143,7 +144,7 @@ rime-bilingual-ime/
 │   └── default/                 # 可公开的默认 profile
 ├── vendor/
 │   └── rime-ice/
-├── docs/
+├── ai-docs/
 └── tests/
 ```
 

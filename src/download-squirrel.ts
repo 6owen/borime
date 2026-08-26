@@ -29,7 +29,7 @@ async function getAsset(): Promise<{ source: string; size: number }> {
       {
         headers: {
           Accept: 'application/vnd.github+json',
-          'User-Agent': 'rime-bilingual-ime',
+          'User-Agent': 'borime',
         },
         signal: AbortSignal.timeout(20_000),
       },

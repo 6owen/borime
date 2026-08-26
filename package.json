@@ -1,13 +1,13 @@
 {
-  "name": "rime-bilingual-ime",
+  "name": "borime",
   "version": "1.0.0",
-  "description": "Cross-platform Rime bilingual candidate filter with a DeepSeek AI SDK sidecar",
+  "description": "Rime bilingual candidate annotations with local dictionaries and asynchronous AI translation",
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "pnpm test:ts && pnpm test:lua",
-    "test:ts": "vitest run",
+    "test:ts": "vitest run --dir src",
     "test:lua": "luajit tests/lua/smart_enter_test.lua && luajit tests/lua/selection_keeper_test.lua && luajit tests/lua/bilingual_filter_test.lua && luajit tests/lua/mixed_input_test.lua",
     "worker": "tsx src/worker.ts",
     "seed": "tsx src/seed.ts",
@@ -21,8 +21,16 @@
     "package:release": "pnpm build && tsx src/package-release.ts"
   },
   "keywords": [],
-  "author": "",
+  "author": "6owen",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/6owen/borime.git"
+  },
+  "bugs": {
+    "url": "https://github.com/6owen/borime/issues"
+  },
+  "homepage": "https://github.com/6owen/borime#readme",
   "packageManager": "pnpm@10.13.1",
   "engines": {
     "node": ">=22"

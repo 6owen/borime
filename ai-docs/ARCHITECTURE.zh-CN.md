@@ -198,6 +198,9 @@ Lua 初始化时读取三层 TSV；其中大型 `cedict.tsv` 在一个 Rime 会�
 4. 如果命中来自 `dynamic.tsv`，通过 `_comment_highlight` 标为 AI 语义色，不添加文字前缀。
 5. 始终保留原候选 `text`，因此上屏只有中文。
 
+安装器只有在检测到 API Key 时才创建运行时 `ai.enabled` 标记。没有该标记时，Lua 仍展示本地
+词典注释，但不会显示 `翻译中…` 或把缓存未命中候选写入 AI 队列。
+
 ### 5.2 未命中路径
 
 前 5 个候选中有汉字且未命中缓存时：
@@ -217,11 +220,17 @@ sidecar 每次成功写入 `dynamic.tsv` 后，会更新 `cache.version`。Lua �
 
 查找时按 `dynamic → seed → dictionary` 顺序访问三个 Map，仍然保持原有覆盖语义。基准测试中，AI 写回后的同步重载由约 94 ms 降至约 0.17 ms；网络调用本身始终位于独立 sidecar，不占用输入线程。
 
-### 5.4 为什么立即刷新会重置候选高亮
+### 5.4 立即刷新时如何保留候选高亮
 
 Lua 在 Squirrel 内执行，Node.js 在另一个进程执行，不能直接跨进程回调 Rime candidate pipeline。项目曾在 macOS 上通过 `Squirrel --nascii` 间接触发重算：即使 `ascii_mode` 已经是 `false`，librime 的 `Context::set_option` 仍会发出 `option_update_notifier`，随后调用 `RefreshNonConfirmedComposition()`。
 
-引擎级复现确认，这条路径会把用 `Down` 移到第二项的高亮索引重置为 `0`。Squirrel 当前也没有“读取并恢复高亮索引”的外部命令。产品要求 AI 翻译必须立即显示，因此 sidecar 仍然主动重算当前 composition；高亮重置是一个待修复问题，不能用延后刷新规避。
+引擎级复现确认，这条路径会先把用 `Down` 移动过的高亮索引重置为 `0`。Borime 不以延后显示
+规避问题，而是在 librime session 内保存并恢复选择。
+
+方向键走 `Context::Highlight()`，只发 `update_notifier`，不会发 `select_notifier`。因此
+`selection_keeper.lua` 位于 schema 原生 selector 之前，把导航键委托给一个同配置的原生
+selector，随后保存处理后的原始编码、caret、候选绝对索引和候选正文。AI 重算完成后，
+`update_notifier` 只有在这些身份信息仍匹配时才调用 `context:highlight(index)` 恢复位置。
 
 第一次未缓存输入会经历：
 
@@ -229,7 +238,7 @@ Lua 在 Squirrel 内执行，Node.js 在另一个进程执行，不能直接跨�
 第一次候选重算：发一个  翻译中…
 DeepSeek 完成：   dynamic.tsv 已有 send one
 Squirrel 立即重算：发一个  send one（AI 语义色）
-当前缺陷：       移动过的高亮可能回到第一项
+selection keeper：恢复刷新前的候选绝对索引
 ```
 
 nightly Squirrel 还提供保留属性 `_comment_highlight`、`_comment_warning` 与 `_refresh_ui`。Lua 用前两者提交当前页的零基候选索引，主题中的 `accent_text_color` 与 `warning_text_color` 分别绘制 AI 缓存和等待状态；第三个属性只触发一次 UI 重绘。旧版前端会忽略这些属性，因此功能降级为普通 comment 颜色，而不会把控制文本显示到候选窗。
@@ -334,9 +343,9 @@ DeepSeek thinking 在两条 provider 路径中都显式关闭。翻译只需要�
 
 缓存写入后，worker 通过 Squirrel 的外部命令请求当前 composition 立即重算，并记录
 `candidate_refresh_requested` 或 `candidate_refresh_failed`。刷新在独立的合并队列中执行，
-不会阻塞后续模型请求。当前外部刷新会让 librime 重建未确认的 composition，因此可能把
-已经移动过的候选高亮重置到第一项；后续修复必须同时满足“立即显示 AI 翻译”和“保留
-当前候选位置”，不能再以延后显示规避。详细约束见
+不会阻塞后续模型请求。外部刷新会让 librime 重建未确认的 composition；session 内的
+selection keeper 会在输入编码、caret、绝对 index 和候选正文仍匹配时恢复刷新前的高亮。
+详细约束见
 [`spec/candidate-selection-preserving-ai-refresh.md`](spec/candidate-selection-preserving-ai-refresh.md)。
 
 如果超时、模型漏项或结构化输出校验失败，worker 默认进行最多 1 次重试，等待 2 秒后重试。新输入导致的主动取消不属于失败且不会重试。普通失败耗尽重试后，该批次会写入 `failed-requests.jsonl`，随后推进 offset，避免坏批次永久阻塞队列或无限消耗 API。中文输入本身不受影响。
@@ -420,7 +429,7 @@ Control + Shift + B
 ### 9.1 项目源文件
 
 ```text
-rime-bilingual-ime/
+borime/
 ├── rime/
 │   ├── default.custom.yaml                 # 全局按键、方案列表、页大小
 │   ├── double_pinyin_flypy.custom.yaml     # 双语开关和 Lua filter
@@ -462,6 +471,7 @@ Rime 用户目录/                             # macOS: ~/Library/Rime
     ├── requests.txt                        # 追加请求日志
     ├── .queue-offset                       # 消费字节位置
     ├── cache.version                       # Lua 缓存失效版本
+    ├── ai.enabled                          # 存在 API Key 时创建的请求开关
     ├── worker.log                          # 成功与启动日志
     └── worker.error.log                    # 超时、模型或解析错误
 ```
@@ -473,7 +483,7 @@ Rime 用户目录/                             # macOS: ~/Library/Rime
 所有命令都在项目目录执行：
 
 ```bash
-cd /path/to/rime-bilingual-ime
+cd /path/to/borime
 ```
 
 ### 状态、测试与构建

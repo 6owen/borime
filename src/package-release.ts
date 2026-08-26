@@ -15,7 +15,7 @@ export const releaseEntries = [
   'LICENSE',
   'README.md',
   'THIRD_PARTY_NOTICES.md',
-  'docs',
+  'ai-docs',
   'dist',
   'package.json',
   'pnpm-lock.yaml',

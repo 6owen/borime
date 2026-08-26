@@ -12,6 +12,13 @@ local function read_version(path)
   return value
 end
 
+local function file_exists(path)
+  local file = io.open(path, "r")
+  if not file then return false end
+  file:close()
+  return true
+end
+
 local function load_tsv(path)
   local target = {}
   local file = io.open(path, "r")
@@ -152,6 +159,8 @@ function filter.init(env)
   env.queue_path = join_path(user_dir, "requests.txt")
   env.queue_lock_path = join_path(user_dir, ".queue-maintenance")
   env.version_path = join_path(user_dir, "cache.version")
+  env.ai_enabled_path = join_path(user_dir, "ai.enabled")
+  env.ai_enabled = file_exists(env.ai_enabled_path)
   env.max_candidates = config:get_int("bilingual/max_candidates") or 5
   env.max_comment_length = config:get_int("bilingual/max_comment_length") or 42
   env.last_snapshot_signature = nil
@@ -190,7 +199,9 @@ function filter.func(input, env)
           display = truncate_text(english, env.max_comment_length),
           source = source,
         }
-      elseif has_han(text) and candidate.type ~= "mixed_input" then
+      elseif env.ai_enabled
+        and has_han(text)
+        and candidate.type ~= "mixed_input" then
         requested[#requested + 1] = text
         decorated[#decorated + 1] = {
           candidate = candidate,

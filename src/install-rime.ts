@@ -5,6 +5,7 @@ import {
   cp,
   mkdir,
   readdir,
+  rm,
   writeFile,
 } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -104,10 +105,19 @@ async function installRimeFiles(config: AppConfig): Promise<void> {
     encoding: 'utf8',
     mode: 0o600,
   });
+  if (config.apiKey) {
+    await writeFile(config.aiEnabledPath, 'enabled\n', {
+      encoding: 'utf8',
+      mode: 0o600,
+    });
+  } else {
+    await rm(config.aiEnabledPath, { force: true });
+  }
   for (const path of [
     config.seedPath,
     config.dictionaryPath,
     config.versionPath,
+    config.aiEnabledPath,
     config.workerLogPath,
     config.workerErrorLogPath,
     join(config.projectRoot, '.env'),

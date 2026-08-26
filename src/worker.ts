@@ -5,6 +5,7 @@ import {
   appendDiagnosticEvent,
   type DiagnosticEvent,
 } from './diagnostics.js';
+import { DeferredRequests } from './deferred-requests.js';
 import { appendRotatingLine, WorkerLogger } from './logger.js';
 import { runPreemptible } from './preemption.js';
 import { RetryLimitError, withRetry } from './retry.js';
@@ -88,6 +89,7 @@ async function main(): Promise<void> {
     }),
   );
   let warnedMissingKey = false;
+  const deferred = new DeferredRequests();
 
   await logger.info(
     `[rime-bilingual] worker ready; ${known.size} cached translations; model=${config.model}`,
@@ -102,14 +104,20 @@ async function main(): Promise<void> {
       known,
       config.batchSize,
     );
+    let isDeferredBatch = false;
 
     if (window.texts.length === 0) {
       if (window.nextOffset > window.currentOffset) {
         await commitQueueOffset(config.cursorPath, window.nextOffset);
         await maintainQueue(config);
       }
-      await sleep(config.pollMs);
-      continue;
+      const deferredTexts = deferred.take(config.batchSize, known);
+      if (deferredTexts.length === 0) {
+        await sleep(config.pollMs);
+        continue;
+      }
+      window = { ...window, texts: deferredTexts };
+      isDeferredBatch = true;
     }
 
     const batchId = randomUUID();
@@ -121,7 +129,7 @@ async function main(): Promise<void> {
       debounceMs: config.debounceMs,
     });
 
-    if (config.apiKey) {
+    if (config.apiKey && !isDeferredBatch) {
       await sleep(config.debounceMs);
       const refreshed = await readQueueWindow(
         config.queuePath,
@@ -212,11 +220,14 @@ async function main(): Promise<void> {
               known,
               config.batchSize,
             );
-            return latest.nextOffset !== requestOffset;
+            return isDeferredBatch
+              ? latest.texts.length > 0
+              : latest.nextOffset !== requestOffset;
           },
         },
       );
       if (outcome.status === 'superseded') {
+        if (!isDeferredBatch) deferred.rememberTop(requestTexts);
         await diagnostic(config, {
           type: 'request_superseded',
           batchId,
@@ -239,10 +250,13 @@ async function main(): Promise<void> {
         dynamic.set(source, english);
         known.set(source, english);
       }
+      if (isDeferredBatch) deferred.complete(requestTexts);
       await writeTranslationMap(config.dynamicPath, dynamic);
       await bumpVersion(config.versionPath);
-      await commitQueueOffset(config.cursorPath, requestOffset);
-      await maintainQueue(config);
+      if (!isDeferredBatch) {
+        await commitQueueOffset(config.cursorPath, requestOffset);
+        await maintainQueue(config);
+      }
       await diagnostic(config, {
         type: 'cache_written',
         batchId,
@@ -263,8 +277,12 @@ async function main(): Promise<void> {
         }),
         config.logMaxBytes,
       );
-      await commitQueueOffset(config.cursorPath, requestOffset);
-      await maintainQueue(config);
+      if (isDeferredBatch) {
+        deferred.complete(requestTexts);
+      } else {
+        await commitQueueOffset(config.cursorPath, requestOffset);
+        await maintainQueue(config);
+      }
       await diagnostic(config, {
         type: 'request_failed',
         batchId,

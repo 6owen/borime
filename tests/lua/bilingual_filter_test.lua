@@ -50,6 +50,10 @@ assert(
 env.engine.context = {
   input = "vcdygedifh",
   get_option = function(_, name) return name == "bilingual_output" end,
+  properties = {},
+  set_property = function(self, name, value)
+    self.properties[name] = value
+  end,
 }
 ShadowCandidate = function(_, candidate_type, text, comment)
   return { type = candidate_type, text = text, comment = comment }
@@ -76,6 +80,44 @@ queue:close()
 assert(
   queued_snapshot == "@snapshot\t找一个地方\t找一个\t招一个\n",
   "the filter must queue one ranked snapshot for the visible candidates"
+)
+assert(
+  env.engine.context.properties._comment_warning == "0,1,2,100003",
+  "pending AI translations must use Squirrel's warning comment color"
+)
+assert(
+  env.engine.context.properties._comment_highlight == "100001",
+  "an out-of-range sentinel must clear stale AI comment highlights"
+)
+assert(
+  env.engine.context.properties._refresh_ui == "1",
+  "semantic comment properties must request one UI-only redraw"
+)
+
+assert(filter._encode_indices({ 0, 2 }, 100000) == "0,2,100000")
+
+yielded = {}
+env.engine.context.input = "lirk"
+local cached_candidates = {
+  { type = "phrase", text = "利刃", comment = "" },
+  { type = "phrase", text = "例如", comment = "" },
+}
+filter.func({ iter = function()
+  local index = 0
+  return function()
+    index = index + 1
+    return cached_candidates[index]
+  end
+end }, env)
+assert(yielded[1].comment == "sharp blade", "AI text must not contain an AI prefix")
+assert(yielded[2].comment == "for example", "preset text must remain unchanged")
+assert(
+  env.engine.context.properties._comment_highlight == "0,100000",
+  "cached AI translations must use Squirrel's accent comment color"
+)
+assert(
+  env.engine.context.properties._comment_warning == "100002",
+  "a new snapshot must clear stale warning rows"
 )
 
 io.open = original_open

@@ -45,7 +45,7 @@ flowchart LR
   C --> L[Lua bilingual_filter]
 
   L -->|本地命中| V[ShadowCandidate<br/>text=中文 / comment=英文]
-  L -->|本地未命中| P[显示 AI 翻译中…]
+  L -->|本地未命中| P[显示翻译中…]
   P --> Q[requests.txt 追加队列]
   Q --> W[Node.js sidecar<br/>LaunchAgent / Scheduled Task]
   W --> A[Vercel AI SDK]
@@ -77,7 +77,7 @@ flowchart LR
 | 原始编码（raw input/code） | `fayige` | 键盘与拼音解析 |
 | 组合态（composition） | 尚未确认的输入区 | Rime 上下文 |
 | 候选正文（candidate.text） | `发一个` | 中文候选生成 |
-| 候选注释（candidate.comment） | `AI · send one` | Lua 展示增强 |
+| 候选注释（candidate.comment） | `send one` | Lua 展示增强；nightly Squirrel 用语义颜色区分来源 |
 
 确认候选时，客户端接收到的是 `candidate.text`，不是视觉上看到的整行文本。
 
@@ -85,7 +85,7 @@ Lua 使用 `ShadowCandidate` 创建一个外观增强候选：
 
 ```text
 text    = 发一个
-comment = AI · send one
+comment = send one
 ```
 
 所以按空格或数字键后只会上屏 `发一个`。英文只是候选 UI 的元数据，不进入正文。
@@ -195,14 +195,14 @@ Lua 初始化时读取三层 TSV；其中大型 `cedict.tsv` 在一个 Rime 会�
 1. 只处理前 `bilingual/max_candidates` 个候选，当前为 5。
 2. 在内存 Map 中按中文正文查英文。
 3. 命中时构造 `ShadowCandidate`。
-4. 如果命中来自 `dynamic.tsv`，显示 `AI ·` 前缀。
+4. 如果命中来自 `dynamic.tsv`，通过 `_comment_highlight` 标为 AI 语义色，不添加文字前缀。
 5. 始终保留原候选 `text`，因此上屏只有中文。
 
 ### 5.2 未命中路径
 
 前 5 个候选中有汉字且未命中缓存时：
 
-1. 候选立即显示 `AI 翻译中…`。
+1. 候选立即显示 `翻译中…`，并通过 `_comment_warning` 标为等待色。
 2. 中文候选仍可立即确认，不等待模型。
 3. 当前前 5 个缓存未命中候选按排名写成一条 `@snapshot` 记录。
 4. 同一 Lua 会话用“当前编码 + 候选快照”签名避免重复追加相同窗口。
@@ -219,20 +219,22 @@ sidecar 每次成功写入 `dynamic.tsv` 后，会更新 `cache.version`。Lua �
 
 ### 5.4 macOS 如何自动原地刷新
 
-Lua 在 Squirrel 内执行，Node.js 在另一个进程执行，不能直接跨进程回调 Rime candidate pipeline。macOS 版改用鼠须管已经公开使用的分布式通知通道：sidecar 写入缓存并更新版本后先用 `Squirrel --getascii` 查询活动控制器；只有它在 1.5 秒内明确回复 `nascii`，才执行 `Squirrel --nascii`。该命令不会合成按键，而是通知当前 `SquirrelInputController` 再次设置 `ascii_mode = false`。如果用户已经切到内部英文模式或离开鼠须管，刷新会被跳过，避免延迟响应擅自改变输入模式。
+Lua 在 Squirrel 内执行，Node.js 在另一个进程执行，不能直接跨进程回调 Rime candidate pipeline。macOS 版改用鼠须管已经公开使用的分布式通知通道：sidecar 写入缓存并更新版本后先用 `Squirrel --getascii` 查询活动控制器；只有它在 300 ms 内明确回复 `nascii`，才执行 `Squirrel --nascii`。刷新在独立的合并队列中执行，不阻塞下一批翻译。该命令不会合成按键，而是通知当前 `SquirrelInputController` 再次设置 `ascii_mode = false`。如果用户已经切到内部英文模式或离开鼠须管，刷新会被跳过，避免延迟响应擅自改变输入模式。
 
 librime 的 `Context::set_option` 即使值没有变化也会触发 `option_update_notifier`；引擎收到通知后对活动 composition 执行 `RefreshNonConfirmedComposition()`。鼠须管随后调用 `rimeUpdate()`，因此当前候选窗会重新运行 Lua filter、读到新版本并原地显示英文。
 
 因此 macOS 第一次未缓存输入会经历：
 
 ```text
-第一次候选重算：发一个  AI 翻译中…
+第一次候选重算：发一个  翻译中…
 DeepSeek 完成：   dynamic.tsv 已有 send one
 sidecar 通知：    Squirrel --nascii（不产生字符）
-自动候选重算：   发一个  AI · send one
+自动候选重算：   发一个  send one（AI 语义色）
 ```
 
-该通道不需要 macOS 辅助功能权限，也不会向前台应用注入虚拟键。Windows 小狼毫目前没有接入等价的跨进程刷新命令；其缓存仍会在下一次真实候选重算时可见。
+nightly Squirrel 还提供保留属性 `_comment_highlight`、`_comment_warning` 与 `_refresh_ui`。Lua 用前两者提交当前页的零基候选索引，主题中的 `accent_text_color` 与 `warning_text_color` 分别绘制 AI 缓存和等待状态；第三个属性只触发一次 UI 重绘。旧版前端会忽略这些属性，因此功能降级为普通 comment 颜色，而不会把控制文本显示到候选窗。
+
+该通道不需要 macOS 辅助功能权限，也不会向前台应用注入虚拟键。Windows 小狼毫目前没有接入等价的跨进程刷新与语义 comment 颜色；其缓存仍会在下一次真实候选重算时可见。
 
 ## 6. Node.js sidecar：异步慢路径
 
@@ -534,8 +536,8 @@ Get-Content "$env:APPDATA\Rime\bilingual\worker.log" -Wait
 | --- | --- | --- | --- |
 | 所有候选都没有英文 | 双语开关关闭或 Lua 未部署 | 看方案状态、检查已部署 Lua | 按 `Control+Shift+B`；重新部署 |
 | 只有常见词有英文 | CC-CEDICT 命中，AI 尚未完成 | `pnpm diagnose -- --watch` | 等待 `cache ready` 与 `candidate window refresh requested` |
-| 显示 `AI 翻译中…` 很久 | API 超时、Key/模型错误 | `worker.error.log` | 检查 `.env`、接口和超时 |
-| 显示 `AI · English` | 命中 `dynamic.tsv` | 查 `dynamic.tsv` | 正常的 AI 缓存结果 |
+| 显示 `翻译中…` 很久 | API 超时、Key/模型错误 | `worker.error.log` | 检查 `.env`、接口和超时 |
+| 英文 comment 使用浅蓝色 | 命中 `dynamic.tsv` | 查 `dynamic.tsv` | 正常的 AI 缓存结果 |
 | 英文释义很长、像词典 | CC-CEDICT 多义项 | 查 `cedict.tsv` | 修订 `dynamic.tsv`，随后运行 `pnpm install:rime` |
 | 长句只翻译成短片段 | Rime 只生成了片段候选 | 观察候选正文 | 继续输入到完整候选，或接受当前架构边界 |
 | 输入过程中偶发顿挫 | 大型词典被反复同步解析 | 检查是否为旧版 Lua | 部署当前优化版；CC-CEDICT 每会话只加载一次 |
@@ -548,13 +550,13 @@ Get-Content "$env:APPDATA\Rime\bilingual\worker.log" -Wait
 一个可靠的排查顺序：
 
 ```text
-候选是否有 AI 翻译中…
+候选是否有翻译中…
   ↓ 有：Lua 工作，继续查 sidecar
 LaunchAgent / Windows 计划任务是否 running
   ↓ 是：查 worker.error.log
 dynamic.tsv 是否出现中文词条
   ↓ 有：缓存已写，触发一次候选重算
-候选是否出现 AI ·
+候选是否出现浅蓝色英文 comment
 ```
 
 ## 12. 配置旋钮

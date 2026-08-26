@@ -77,6 +77,7 @@ async function installRimeFiles(config: AppConfig): Promise<void> {
   for (const name of [
     'double_pinyin_flypy.custom.yaml',
     'default.custom.yaml',
+    'squirrel.custom.yaml',
   ]) {
     await cp(join(integration, name), join(config.rimeDirectory, name), {
       force: true,

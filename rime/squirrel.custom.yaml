@@ -1,0 +1,6 @@
+# Semantic comment colors supported by Squirrel nightly.
+# Colors are BGR: AI cache = light blue, pending translation = amber.
+patch:
+  "preset_color_schemes/purity_of_form_custom/hilited_comment_text_color": 0x8F6F2F
+  "preset_color_schemes/purity_of_form_custom/accent_text_color": 0xFCD37D
+  "preset_color_schemes/purity_of_form_custom/warning_text_color": 0x24BFFB

@@ -15,6 +15,9 @@ patch:
 
   "engine/processors/@before 1": lua_processor@*ascii_spacing_processor
   "engine/processors/@before 4": lua_processor@*smart_enter
+  # Run after smart_enter but before librime's built-in selector. The keeper
+  # delegates navigation to a native selector and snapshots its actual result.
+  "engine/processors/@before 5": lua_processor@*selection_keeper
   "engine/translators/+":
     - lua_translator@*mixed_input_translator
   "engine/filters/+":

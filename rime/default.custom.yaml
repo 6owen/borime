@@ -2,6 +2,11 @@ patch:
   schema_list:
     - schema: double_pinyin_flypy
   menu/page_size: 5
+  # Keep VS Code's integrated-terminal shortcut available to the host app.
+  # F4 and Control+Shift+grave still open Rime's scheme menu.
+  "switcher/hotkeys":
+    - F4
+    - "Control+Shift+grave"
   "ascii_composer/switch_key":
     Caps_Lock: commit_code
     Shift_L: commit_code

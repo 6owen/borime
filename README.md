@@ -47,7 +47,8 @@ macOS 后台服务定义位于：
 | `dakdapp → 打开 APP` 中英混输 | `rime/lua/mixed_input_translator.lua` |
 | 中英文自动空格 | `rime/lua/mixed_spacing_filter.lua`、`rime/lua/ascii_spacing_processor.lua` |
 | 回车确认候选或输入原始拼音 | `rime/lua/smart_enter.lua` |
-| 开关、快捷键、固定候选、候选数量 | `rime/double_pinyin_flypy.custom.yaml` |
+| AI 刷新后保留当前候选位置 | `rime/lua/selection_keeper.lua` |
+| 方案菜单、开关、快捷键、固定候选、候选数量 | `rime/default.custom.yaml`、`rime/double_pinyin_flypy.custom.yaml` |
 | 候选窗颜色与样式 | `rime/squirrel.custom.yaml` |
 | AI prompt 和模型调用 | `src/translator.ts` |
 | AI 队列、取消、缓存与优先级 | `src/worker.ts` |
@@ -249,7 +250,7 @@ macOS 上 AI 写入缓存后，sidecar 会通过鼠须管的分布式通知通�
 ## 行为边界
 
 - 初始词表和已缓存词会立即在候选注释中显示英文，但始终只上屏中文。
-- 新词第一次出现时显示琥珀色的 `翻译中…`；macOS sidecar 完成后自动刷新。nightly Squirrel 用浅蓝色 comment 标记非高亮的 AI 缓存，词典／预置翻译保持灰色；当前高亮行统一使用深蓝 comment 以保证可读性。候选不再占用字符显示 `AI` 前缀；旧版前端忽略语义颜色但仍正常显示英文。
+- 新词第一次出现时显示琥珀色的 `翻译中…`；macOS sidecar 完成后自动刷新，并在输入编码和候选正文未变化时恢复刷新前的候选绝对索引。nightly Squirrel 用浅蓝色 comment 标记非高亮的 AI 缓存，词典／预置翻译保持灰色；当前高亮行统一使用深蓝 comment 以保证可读性。候选不再占用字符显示 `AI` 前缀；旧版前端忽略语义颜色但仍正常显示英文。
 - 纯中文模式不会创建翻译请求。
 - 动态缓存位于 Rime 用户目录下的 `bilingual/dynamic.tsv`，可以私下备份或人工修订，不应提交到公开仓库。
 - 英文注释最多显示 42 个 Unicode 字符，超长词典释义以省略号收尾；缓存仍保留完整值。

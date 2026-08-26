@@ -8,7 +8,7 @@
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "pnpm test:ts && pnpm test:lua",
     "test:ts": "vitest run",
-    "test:lua": "luajit tests/lua/smart_enter_test.lua && luajit tests/lua/bilingual_filter_test.lua && luajit tests/lua/mixed_input_test.lua",
+    "test:lua": "luajit tests/lua/smart_enter_test.lua && luajit tests/lua/selection_keeper_test.lua && luajit tests/lua/bilingual_filter_test.lua && luajit tests/lua/mixed_input_test.lua",
     "worker": "tsx src/worker.ts",
     "seed": "tsx src/seed.ts",
     "import:cedict": "tsx src/import-cedict.ts",

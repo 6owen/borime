@@ -52,7 +52,7 @@ flowchart LR
   A --> M[DeepSeek / OpenAI-compatible API]
   M --> X[dynamic.tsv 原子写入]
   X --> B[cache.version 递增]
-  B -->|下一次候选重算时重载| L
+  B -->|请求 Squirrel 立即重算当前候选| L
 
   V --> O[确认候选]
   O --> T[只上屏中文]
@@ -94,7 +94,7 @@ comment = send one
 
 小鹤双拼首先是一套编码映射：它定义按键序列如何表达声母、韵母。它本身并不等于词库。
 
-雾凇拼音提供中文词条、读音、基础权重、语言模型和输入方案配置。当前项目把
+雾凇拼音提供中文词条、读音、基础权重和输入方案配置，并提供可选的语言模型安装配方。当前项目把
 `vendor/rime-ice` 部署到 Rime 用户目录，并选择 `double_pinyin_flypy` 方案。该目录在
 macOS 是 `~/Library/Rime`，在 Windows 是 `%APPDATA%\Rime`。
 
@@ -113,7 +113,7 @@ Rime 部署时会把 YAML 词典编译成适合查询的二进制结构，例如
 
 实际使用中，Rime 还会在 Rime 用户目录下的 `<词典名>.userdb/` 保存用户词典。它记录使用习惯和用户词条，并参与候选质量计算。长期使用后，常选词会更符合个人习惯。
 
-这里不应把 userdb 简化成“一个纯计数器”。候选最终排序来自静态词频、语言模型、编码匹配、用户词典质量等多种信号。当前项目没有改写 librime 的排序算法，而是完整保留它的学习能力。
+这里不应把 userdb 简化成“一个纯计数器”。候选最终排序来自静态词频、编码匹配、用户词典质量，以及安装后可选启用的语言模型等多种信号。当前项目没有改写 librime 的排序算法，而是完整保留它的学习能力；当前默认部署尚未安装 `.gram` 语言模型。
 
 用户学习还与方案和编码路径有关。以小鹤双拼为例，“有/又”的标准输入码是 `yz`；
 全拼式 `you` 不是同一条编码路径，不能据此判断 `yz` 下的个人词频没有学习。Emoji
@@ -217,24 +217,24 @@ sidecar 每次成功写入 `dynamic.tsv` 后，会更新 `cache.version`。Lua �
 
 查找时按 `dynamic → seed → dictionary` 顺序访问三个 Map，仍然保持原有覆盖语义。基准测试中，AI 写回后的同步重载由约 94 ms 降至约 0.17 ms；网络调用本身始终位于独立 sidecar，不占用输入线程。
 
-### 5.4 macOS 如何自动原地刷新
+### 5.4 为什么立即刷新会重置候选高亮
 
-Lua 在 Squirrel 内执行，Node.js 在另一个进程执行，不能直接跨进程回调 Rime candidate pipeline。macOS 版改用鼠须管已经公开使用的分布式通知通道：sidecar 写入缓存并更新版本后先用 `Squirrel --getascii` 查询活动控制器；只有它在 300 ms 内明确回复 `nascii`，才执行 `Squirrel --nascii`。刷新在独立的合并队列中执行，不阻塞下一批翻译。该命令不会合成按键，而是通知当前 `SquirrelInputController` 再次设置 `ascii_mode = false`。如果用户已经切到内部英文模式或离开鼠须管，刷新会被跳过，避免延迟响应擅自改变输入模式。
+Lua 在 Squirrel 内执行，Node.js 在另一个进程执行，不能直接跨进程回调 Rime candidate pipeline。项目曾在 macOS 上通过 `Squirrel --nascii` 间接触发重算：即使 `ascii_mode` 已经是 `false`，librime 的 `Context::set_option` 仍会发出 `option_update_notifier`，随后调用 `RefreshNonConfirmedComposition()`。
 
-librime 的 `Context::set_option` 即使值没有变化也会触发 `option_update_notifier`；引擎收到通知后对活动 composition 执行 `RefreshNonConfirmedComposition()`。鼠须管随后调用 `rimeUpdate()`，因此当前候选窗会重新运行 Lua filter、读到新版本并原地显示英文。
+引擎级复现确认，这条路径会把用 `Down` 移到第二项的高亮索引重置为 `0`。Squirrel 当前也没有“读取并恢复高亮索引”的外部命令。产品要求 AI 翻译必须立即显示，因此 sidecar 仍然主动重算当前 composition；高亮重置是一个待修复问题，不能用延后刷新规避。
 
-因此 macOS 第一次未缓存输入会经历：
+第一次未缓存输入会经历：
 
 ```text
 第一次候选重算：发一个  翻译中…
 DeepSeek 完成：   dynamic.tsv 已有 send one
-sidecar 通知：    Squirrel --nascii（不产生字符）
-自动候选重算：   发一个  send one（AI 语义色）
+Squirrel 立即重算：发一个  send one（AI 语义色）
+当前缺陷：       移动过的高亮可能回到第一项
 ```
 
 nightly Squirrel 还提供保留属性 `_comment_highlight`、`_comment_warning` 与 `_refresh_ui`。Lua 用前两者提交当前页的零基候选索引，主题中的 `accent_text_color` 与 `warning_text_color` 分别绘制 AI 缓存和等待状态；第三个属性只触发一次 UI 重绘。旧版前端会忽略这些属性，因此功能降级为普通 comment 颜色，而不会把控制文本显示到候选窗。
 
-该通道不需要 macOS 辅助功能权限，也不会向前台应用注入虚拟键。Windows 小狼毫目前没有接入等价的跨进程刷新与语义 comment 颜色；其缓存仍会在下一次真实候选重算时可见。
+macOS 鼠须管由 sidecar 请求立即重算并读取 AI 缓存；Windows 小狼毫当前仍在下一次正常候选重算时读取缓存。nightly Squirrel 的语义 comment 颜色仍然可用；它们只重绘当前已有数据，不触发翻译缓存重载。
 
 ## 6. Node.js sidecar：异步慢路径
 
@@ -332,7 +332,12 @@ DeepSeek thinking 在两条 provider 路径中都显式关闭。翻译只需要�
 3. 更新 `cache.version`。
 4. 整批成功后提交 `.queue-offset`。
 
-macOS 候选刷新不在翻译主循环中同步等待。多个缓存写入会合并刷新；`--getascii`／`--nascii` 单次最多等待 300 ms。没有活动 Squirrel controller 时刷新失败只影响当前候选窗的主动重绘，不会阻塞下一批模型请求。
+缓存写入后，worker 通过 Squirrel 的外部命令请求当前 composition 立即重算，并记录
+`candidate_refresh_requested` 或 `candidate_refresh_failed`。刷新在独立的合并队列中执行，
+不会阻塞后续模型请求。当前外部刷新会让 librime 重建未确认的 composition，因此可能把
+已经移动过的候选高亮重置到第一项；后续修复必须同时满足“立即显示 AI 翻译”和“保留
+当前候选位置”，不能再以延后显示规避。详细约束见
+[`spec/candidate-selection-preserving-ai-refresh.md`](spec/candidate-selection-preserving-ai-refresh.md)。
 
 如果超时、模型漏项或结构化输出校验失败，worker 默认进行最多 1 次重试，等待 2 秒后重试。新输入导致的主动取消不属于失败且不会重试。普通失败耗尽重试后，该批次会写入 `failed-requests.jsonl`，随后推进 offset，避免坏批次永久阻塞队列或无限消耗 API。中文输入本身不受影响。
 
@@ -424,6 +429,7 @@ rime-bilingual-ime/
 │   ├── lua/mixed_spacing_filter.lua         # 候选边界自动空格
 │   ├── lua/ascii_spacing_processor.lua      # ASCII 模式边界空格
 │   ├── lua/smart_enter.lua                 # 导航后 Return 确认候选
+│   ├── lua/selection_keeper.lua            # AI 重算后恢复候选绝对索引
 │   └── bilingual/seed.tsv                  # 初始翻译覆盖层
 ├── src/
 │   ├── config.ts                           # 环境变量和路径
@@ -535,7 +541,7 @@ Get-Content "$env:APPDATA\Rime\bilingual\worker.log" -Wait
 | 现象 | 最可能原因 | 检查方式 | 处理方式 |
 | --- | --- | --- | --- |
 | 所有候选都没有英文 | 双语开关关闭或 Lua 未部署 | 看方案状态、检查已部署 Lua | 按 `Control+Shift+B`；重新部署 |
-| 只有常见词有英文 | CC-CEDICT 命中，AI 尚未完成 | `pnpm diagnose -- --watch` | 等待 `cache ready` 与 `candidate window refresh requested` |
+| 只有常见词有英文 | CC-CEDICT 命中，AI 尚未完成 | `pnpm diagnose -- --watch` | 等待 `cache ready`，再继续输入或开始下一次输入 |
 | 显示 `翻译中…` 很久 | API 超时、Key/模型错误 | `worker.error.log` | 检查 `.env`、接口和超时 |
 | 英文 comment 使用浅蓝色 | 命中 `dynamic.tsv` | 查 `dynamic.tsv` | 正常的 AI 缓存结果 |
 | 英文释义很长、像词典 | CC-CEDICT 多义项 | 查 `cedict.tsv` | 修订 `dynamic.tsv`，随后运行 `pnpm install:rime` |
@@ -555,7 +561,7 @@ Get-Content "$env:APPDATA\Rime\bilingual\worker.log" -Wait
 LaunchAgent / Windows 计划任务是否 running
   ↓ 是：查 worker.error.log
 dynamic.tsv 是否出现中文词条
-  ↓ 有：缓存已写，触发一次候选重算
+  ↓ 有：缓存已写，继续输入以触发正常候选重算
 候选是否出现浅蓝色英文 comment
 ```
 
@@ -617,7 +623,7 @@ dynamic.tsv 是否出现中文词条
 
 ### 技术债务
 
-- sidecar 无法主动刷新已打开的候选菜单。
+- macOS sidecar 可以主动刷新候选菜单，但外部刷新无法读取和恢复活动 session 的高亮位置；当前可能跳回第一项。
 - CC-CEDICT 在 Rime 会话初始化时仍需全量解析；动态层增长很大后，TSV 全量写回也会逐渐昂贵。
 - 一个 batch 中任意漏项仍会导致整批重试，但已受到重试上限和死信记录保护。
 - 连续中英混输采用精确词典切分，尚不支持任意未登录英文、复杂产品名或上下文消歧。

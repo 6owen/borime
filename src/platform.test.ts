@@ -4,10 +4,54 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   findWeaselDeployer,
+  inspectSquirrelRuntime,
+  parseSquirrelProcesses,
   requestCandidateRefresh,
   resolveRimeDirectory,
   squirrelExecutable,
 } from './platform.js';
+
+describe('Squirrel runtime health', () => {
+  it('finds duplicate CLI processes and the userdb lock owner', async () => {
+    const ps = [
+      `79713 ${squirrelExecutable}`,
+      `35841 ${squirrelExecutable} --version`,
+      '99999 /usr/bin/unrelated',
+    ].join('\n');
+    const calls: string[] = [];
+    const health = await inspectSquirrelRuntime(
+      '/Users/test/Library/Rime/rime_ice.userdb/LOCK',
+      async executable => {
+        calls.push(executable);
+        return executable === '/bin/ps'
+          ? { stdout: ps }
+          : { stdout: '35841\n' };
+      },
+    );
+
+    expect(health.processes.map(process => process.pid)).toEqual([
+      79713,
+      35841,
+    ]);
+    expect(health.suspiciousProcesses).toEqual([
+      expect.objectContaining({ pid: 35841, arguments: '--version' }),
+    ]);
+    expect(health.userDbLockOwners).toEqual([35841]);
+    expect(calls).toEqual(['/bin/ps', '/usr/sbin/lsof']);
+  });
+
+  it('parses the executable path even though it contains spaces', () => {
+    expect(
+      parseSquirrelProcesses(` 42 ${squirrelExecutable}\n`),
+    ).toEqual([
+      {
+        pid: 42,
+        command: squirrelExecutable,
+        arguments: '',
+      },
+    ]);
+  });
+});
 
 describe('resolveRimeDirectory', () => {
   it('uses the native macOS user directory', () => {

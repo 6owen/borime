@@ -2,7 +2,7 @@
 
 鼠须管／小狼毫 + 雾凇小鹤双拼的中英候选扩展。候选命中本地缓存时，英文只显示在候选提示中：
 
-想系统理解词库、Rime 用户词频、Lua filter、DeepSeek sidecar 和缓存一致性，请阅读[系统心智模型与架构说明](docs/ARCHITECTURE.zh-CN.md)。
+想系统理解词库、Rime 用户词频、Lua filter、DeepSeek sidecar 和缓存一致性，请阅读[系统心智模型与架构说明](docs/ARCHITECTURE.zh-CN.md)。准备继续开发、公开分享或增加设置 UI 时，请阅读[项目目录、个人配置与产品化组织](docs/PROJECT-ORGANIZATION.zh-CN.md)。
 
 ```text
 我的帽子  my hat

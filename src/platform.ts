@@ -12,9 +12,73 @@ type CommandRunner = (
   options?: { timeout?: number },
 ) => Promise<unknown>;
 
+export interface SquirrelProcess {
+  pid: number;
+  command: string;
+  arguments: string;
+}
+
+export interface SquirrelRuntimeHealth {
+  processes: SquirrelProcess[];
+  userDbLockOwners: number[];
+  suspiciousProcesses: SquirrelProcess[];
+}
+
 export const squirrelExecutable =
   '/Library/Input Methods/Squirrel.app/Contents/MacOS/Squirrel';
 export const windowsTaskName = 'RimeBilingualIME';
+
+function commandStdout(result: unknown): string {
+  return typeof result === 'object' && result !== null && 'stdout' in result
+    ? String(result.stdout)
+    : '';
+}
+
+export function parseSquirrelProcesses(output: string): SquirrelProcess[] {
+  const processes: SquirrelProcess[] = [];
+  for (const line of output.split(/\r?\n/)) {
+    const match = line.match(/^\s*(\d+)\s+(.+)$/);
+    if (!match) continue;
+    const command = match[2];
+    const executableIndex = command.indexOf(squirrelExecutable);
+    if (executableIndex < 0) continue;
+    processes.push({
+      pid: Number.parseInt(match[1], 10),
+      command,
+      arguments: command
+        .slice(executableIndex + squirrelExecutable.length)
+        .trim(),
+    });
+  }
+  return processes;
+}
+
+/** Detect a second long-lived Squirrel CLI process that can steal userdb/LOCK. */
+export async function inspectSquirrelRuntime(
+  userDbLockPath: string,
+  run: CommandRunner = execFileAsync,
+): Promise<SquirrelRuntimeHealth> {
+  if (process.platform !== 'darwin') {
+    return { processes: [], userDbLockOwners: [], suspiciousProcesses: [] };
+  }
+  const processResult = await run('/bin/ps', ['-axo', 'pid=,command=']);
+  const processes = parseSquirrelProcesses(commandStdout(processResult));
+  let userDbLockOwners: number[] = [];
+  try {
+    const lockResult = await run('/usr/sbin/lsof', ['-t', userDbLockPath]);
+    userDbLockOwners = commandStdout(lockResult)
+      .split(/\s+/)
+      .map(value => Number.parseInt(value, 10))
+      .filter(Number.isFinite);
+  } catch {
+    // lsof exits 1 when no process currently owns the lazily-opened userdb.
+  }
+  return {
+    processes,
+    userDbLockOwners,
+    suspiciousProcesses: processes.filter(process => process.arguments !== ''),
+  };
+}
 
 interface RimeDirectoryOptions {
   platform?: NodeJS.Platform;

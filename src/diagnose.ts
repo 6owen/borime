@@ -2,6 +2,7 @@ import { performance } from 'node:perf_hooks';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getConfig } from './config.js';
+import { inspectSquirrelRuntime } from './platform.js';
 import {
   eventIdentity,
   eventsSinceLastWorkerStart,
@@ -91,6 +92,23 @@ async function printSnapshot(limit: number): Promise<DiagnosticEvent[]> {
   );
   console.log(`队列：${queue.pendingLines} 条待处理；${queue.historyLines} 条历史记录`);
   console.log(`事件文件：${config.diagnosticPath}`);
+  if (process.platform === 'darwin') {
+    const runtime = await inspectSquirrelRuntime(
+      resolve(config.rimeDirectory, 'rime_ice.userdb', 'LOCK'),
+    );
+    const lock = runtime.userDbLockOwners.length
+      ? runtime.userDbLockOwners.join(', ')
+      : '空闲（使用方案后按需获取）';
+    console.log(`鼠须管进程：${runtime.processes.length} 个；userdb 锁：${lock}`);
+    if (runtime.processes.length > 1 || runtime.suspiciousProcesses.length) {
+      const details = runtime.suspiciousProcesses
+        .map(process => `${process.pid} ${process.arguments}`)
+        .join('；');
+      console.log(
+        `警告：发现重复或异常鼠须管进程${details ? `（${details}）` : ''}；它可能独占个人词频数据库。`,
+      );
+    }
+  }
   const currentSession = eventsSinceLastWorkerStart(events);
   console.log('\n本次 worker 会话最近事件：');
   for (const event of currentSession.slice(-limit)) {

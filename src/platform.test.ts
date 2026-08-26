@@ -27,6 +27,7 @@ describe('Squirrel runtime health', () => {
           ? { stdout: ps }
           : { stdout: '35841\n' };
       },
+      'darwin',
     );
 
     expect(health.processes.map(process => process.pid)).toEqual([
@@ -50,6 +51,25 @@ describe('Squirrel runtime health', () => {
         arguments: '',
       },
     ]);
+  });
+
+  it('uses the injected platform instead of the test runner platform', async () => {
+    let called = false;
+    await expect(
+      inspectSquirrelRuntime(
+        '/unused/LOCK',
+        async () => {
+          called = true;
+          return { stdout: '' };
+        },
+        'win32',
+      ),
+    ).resolves.toEqual({
+      processes: [],
+      userDbLockOwners: [],
+      suspiciousProcesses: [],
+    });
+    expect(called).toBe(false);
   });
 });
 

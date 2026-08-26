@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { access, readdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join, win32 } from 'node:path';
+import { join, posix, win32 } from 'node:path';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
@@ -57,8 +57,9 @@ export function parseSquirrelProcesses(output: string): SquirrelProcess[] {
 export async function inspectSquirrelRuntime(
   userDbLockPath: string,
   run: CommandRunner = execFileAsync,
+  platform: NodeJS.Platform = process.platform,
 ): Promise<SquirrelRuntimeHealth> {
-  if (process.platform !== 'darwin') {
+  if (platform !== 'darwin') {
     return { processes: [], userDbLockOwners: [], suspiciousProcesses: [] };
   }
   const processResult = await run('/bin/ps', ['-axo', 'pid=,command=']);
@@ -93,14 +94,14 @@ export function resolveRimeDirectory(
   const env = options.env ?? process.env;
   const home = options.home ?? homedir();
   if (env.RIME_USER_DIR) return env.RIME_USER_DIR;
-  if (platform === 'darwin') return join(home, 'Library', 'Rime');
+  if (platform === 'darwin') return posix.join(home, 'Library', 'Rime');
   if (platform === 'win32') {
     return win32.join(
       env.APPDATA ?? win32.join(home, 'AppData', 'Roaming'),
       'Rime',
     );
   }
-  return join(home, '.local', 'share', 'fcitx5', 'rime');
+  return posix.join(home, '.local', 'share', 'fcitx5', 'rime');
 }
 
 async function exists(path: string): Promise<boolean> {

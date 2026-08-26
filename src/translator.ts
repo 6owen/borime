@@ -51,6 +51,7 @@ export async function translateBatch(
     AppConfig,
     'apiKey' | 'baseURL' | 'model' | 'timeoutMs' | 'maxOutputTokens'
   >,
+  abortSignal?: AbortSignal,
 ): Promise<Map<string, string>> {
   if (!config.apiKey) throw new Error('Translation API key is not configured');
   if (texts.length === 0) return new Map();
@@ -70,6 +71,13 @@ export async function translateBatch(
             prompt,
             maxOutputTokens,
             timeout: config.timeoutMs,
+            abortSignal,
+            maxRetries: 0,
+            providerOptions: {
+              customOpenAI: {
+                thinking: { type: 'disabled' },
+              },
+            },
           })
         ).text,
       )
@@ -81,6 +89,8 @@ export async function translateBatch(
           output: Output.object({ schema: translationsSchema }),
           maxOutputTokens,
           timeout: config.timeoutMs,
+          abortSignal,
+          maxRetries: 0,
           providerOptions: {
             deepseek: {
               thinking: { type: 'disabled' },

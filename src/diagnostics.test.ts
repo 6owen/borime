@@ -47,4 +47,15 @@ describe('translation diagnostics', () => {
       eventsSinceLastWorkerStart([previousFailure, workerReady]),
     ).toEqual([workerReady]);
   });
+
+  it('shows when newer input cancels an active model request', () => {
+    expect(
+      formatDiagnosticEvent({
+        timestamp: '2026-08-26T01:00:05.000Z',
+        type: 'request_superseded',
+        durationMs: 251,
+        texts: ['旧候选'],
+      }),
+    ).toContain('stale model request cancelled 251 ms');
+  });
 });

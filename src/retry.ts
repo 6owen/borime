@@ -10,6 +10,7 @@ export interface RetryOptions {
   maxDelayMs?: number;
   sleep?: (milliseconds: number) => Promise<void>;
   onRetry?: (error: unknown, context: RetryContext) => void | Promise<void>;
+  shouldRetry?: (error: unknown) => boolean;
 }
 
 export class RetryLimitError extends Error {
@@ -38,6 +39,7 @@ export async function withRetry<T>(
       return await operation();
     } catch (error) {
       const attempts = retry + 1;
+      if (options.shouldRetry && !options.shouldRetry(error)) throw error;
       if (retry >= maxRetries) throw new RetryLimitError(attempts, error);
 
       const delayMs = Math.min(

@@ -10,7 +10,7 @@
 
 按空格确认时只上屏 `我的帽子`，英文不会进入正文。
 
-前 5 个候选的缓存缺失项会写入本地队列；停止输入约 800 毫秒后，Node.js sidecar 只取最新 5 个未命中候选，并使用 Vercel AI SDK 的官方 `@ai-sdk/deepseek` provider 批量翻译。Rime 的按键线程从不等待网络。
+前 5 个候选的缓存缺失项会写入本地队列；停止输入约 800 毫秒后，Node.js sidecar 只取最新 5 个未命中候选并批量翻译。新输入出现时，正在进行的旧模型请求会在约一个轮询周期内取消，旧结果不会写入缓存。Rime 的按键线程从不等待网络。
 
 ## 获取代码
 
@@ -75,6 +75,8 @@ cp .env.example .env
 
 OpenAI 兼容路径只要求普通 `/chat/completions`，不会发送 `response_format`；模型返回的 JSON 文本由本地 Zod 校验。因此 curl 能调用、但不支持 `json_schema`／`json_object` 的兼容接口也可以使用。
 
+翻译任务会显式关闭 DeepSeek thinking。这个任务只需要短 JSON；默认 high thinking 可能耗尽输出 token、导致正文为空或 JSON 被截断。AI SDK 自带重试已关闭，由可观测、可配置的 worker 重试层统一处理。
+
 AI 请求默认在初次失败后最多重试 3 次，采用 2 秒、4 秒、8 秒指数退避；仍失败的批次会写入 `failed-requests.jsonl` 并跳过，不会无限调用接口。可通过 `.env` 中的 `RIME_BILINGUAL_MAX_RETRIES` 调整，设为 `0` 表示不重试。
 
 项目随附的 85 条基础翻译位于 `rime/bilingual/seed.tsv`，是首版人工整理，并非从第三方英文词库导入。执行下面的预生成命令时，中文词按雾凇拼音 `cn_dicts/base.dict.yaml` 的权重选取，英文翻译由当前配置的模型生成。
@@ -131,6 +133,7 @@ AI 写入缓存后，已经打开的候选窗不会自行刷新；诊断出现 `
 - 连续输入精确命中的“小鹤双拼中文前缀 + 英文词”会产生混输候选，例如 `dakdapp`（`dakd` = 打开）产生 `打开 APP`。按 `Control+Shift+M` 可临时关闭。
 - 同一候选及相邻 Rime 上屏记录中的 CJK／ASCII 字母数字边界会自动补一个半角空格，例如 `打开APP设置` → `打开 APP 设置`。按 `Control+Shift+S` 可临时关闭。
 - 自动空格也覆盖从中文切到 ASCII 模式后输入的第一个英文字符，但只能利用 Rime 自己的提交历史；手动移动光标、粘贴文本或在其他输入法中输入后，它无法可靠读取应用光标前的字符。
+- 中文候选学习由 Rime userdb 按方案和编码路径记录。小鹤双拼中“有/又”的标准码是 `yz`；输入全拼式的 `you` 不等同于 `yz` 的个人词频路径，Emoji 滤镜还可能额外插入一个同字候选。
 
 ## 多机器同步
 

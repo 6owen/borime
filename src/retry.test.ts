@@ -38,4 +38,23 @@ describe('withRetry', () => {
       8_000,
     ]);
   });
+
+  it('does not retry an operation cancelled by newer input', async () => {
+    const cancelled = new DOMException('superseded', 'AbortError');
+    const operation = vi.fn(async () => {
+      throw cancelled;
+    });
+    const sleep = vi.fn(async () => undefined);
+
+    await expect(
+      withRetry(operation, {
+        maxRetries: 3,
+        baseDelayMs: 2_000,
+        sleep,
+        shouldRetry: error => error !== cancelled,
+      }),
+    ).rejects.toBe(cancelled);
+    expect(operation).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+  });
 });

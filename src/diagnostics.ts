@@ -6,6 +6,7 @@ export type DiagnosticEventType =
   | 'batch_superseded'
   | 'api_key_missing'
   | 'request_started'
+  | 'request_superseded'
   | 'request_retry'
   | 'request_succeeded'
   | 'cache_written'
@@ -87,6 +88,8 @@ export function formatDiagnosticEvent(event: DiagnosticEvent): string {
       return `${time} blocked · API key missing${texts}`;
     case 'request_started':
       return `${time} model request started${duration}${texts}`;
+    case 'request_superseded':
+      return `${time} stale model request cancelled${duration}${texts}`;
     case 'request_retry':
       return `${time} retry ${event.attempt ?? '?'} · waited${duration}, next in ${event.delayMs ?? 0} ms · ${event.error ?? 'unknown error'}`;
     case 'request_succeeded':

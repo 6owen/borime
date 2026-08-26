@@ -89,9 +89,49 @@ describe('OpenAI-compatible translation', () => {
         }),
       ).resolves.toEqual(new Map([['你好', 'hello']]));
       expect(requestBody).not.toHaveProperty('response_format');
+      expect(requestBody).toHaveProperty('thinking', { type: 'disabled' });
     } finally {
       server.close();
       await once(server, 'close');
+    }
+  });
+
+  it('forwards cancellation to the active HTTP request', async () => {
+    let markRequestSeen: (() => void) | undefined;
+    const requestSeen = new Promise<void>(resolve => {
+      markRequestSeen = resolve;
+    });
+    const server = createServer(async request => {
+      for await (const _chunk of request) {
+        // Drain the request before announcing that the model call is active.
+      }
+      markRequestSeen?.();
+    });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const { port } = server.address() as AddressInfo;
+    const controller = new AbortController();
+
+    try {
+      const translation = translateBatch(
+        ['旧候选'],
+        {
+          apiKey: 'test-key',
+          baseURL: `http://127.0.0.1:${port}/v1`,
+          model: 'test-model',
+          timeoutMs: 2_000,
+          maxOutputTokens: 256,
+        },
+        controller.signal,
+      );
+      await requestSeen;
+      controller.abort(new DOMException('newer input arrived', 'AbortError'));
+      await expect(translation).rejects.toMatchObject({ name: 'AbortError' });
+    } finally {
+      const closed = once(server, 'close');
+      server.close();
+      server.closeAllConnections();
+      await closed;
     }
   });
 });

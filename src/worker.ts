@@ -6,6 +6,7 @@ import {
   type DiagnosticEvent,
 } from './diagnostics.js';
 import { appendRotatingLine, WorkerLogger } from './logger.js';
+import { runPreemptible } from './preemption.js';
 import { RetryLimitError, withRetry } from './retry.js';
 import {
   bumpVersion,
@@ -157,49 +158,81 @@ async function main(): Promise<void> {
     }
 
     warnedMissingKey = false;
+    const requestTexts = window.texts;
+    const requestOffset = window.nextOffset;
     const requestStartedAt = Date.now();
     await diagnostic(config, {
       type: 'request_started',
       batchId,
-      texts: window.texts,
+      texts: requestTexts,
       model: config.model,
       durationMs: requestStartedAt - detectedAt,
     });
     try {
-      const translated = await withRetry(
-        async () => {
-          const result = await translateBatch(window.texts, config);
-          if (result.size !== window.texts.length) {
-            const missing = window.texts.filter(text => !result.has(text));
-            throw new Error(`model omitted translations: ${missing.join(', ')}`);
-          }
-          return result;
-        },
+      const outcome = await runPreemptible(
+        signal => withRetry(
+          async () => {
+            const result = await translateBatch(requestTexts, config, signal);
+            if (result.size !== requestTexts.length) {
+              const missing = requestTexts.filter(text => !result.has(text));
+              throw new Error(
+                `model omitted translations: ${missing.join(', ')}`,
+              );
+            }
+            return result;
+          },
+          {
+            maxRetries: config.maxRetries,
+            baseDelayMs: config.retryBaseMs,
+            shouldRetry: () => !signal.aborted,
+            onRetry: async (error, retry) => {
+              await diagnostic(config, {
+                type: 'request_retry',
+                batchId,
+                texts: requestTexts,
+                attempt: retry.attempt,
+                maxRetries: config.maxRetries,
+                delayMs: retry.delayMs,
+                durationMs: Date.now() - requestStartedAt,
+                error: describeError(error),
+              });
+              await logger.error(
+                `[rime-bilingual] translation attempt ${retry.attempt} failed; retry ${retry.retry}/${config.maxRetries} in ${retry.delayMs} ms:`,
+                describeError(error),
+              );
+            },
+          },
+        ),
         {
-          maxRetries: config.maxRetries,
-          baseDelayMs: config.retryBaseMs,
-          onRetry: async (error, retry) => {
-            await diagnostic(config, {
-              type: 'request_retry',
-              batchId,
-              texts: window.texts,
-              attempt: retry.attempt,
-              maxRetries: config.maxRetries,
-              delayMs: retry.delayMs,
-              durationMs: Date.now() - requestStartedAt,
-              error: describeError(error),
-            });
-            await logger.error(
-              `[rime-bilingual] translation attempt ${retry.attempt} failed; retry ${retry.retry}/${config.maxRetries} in ${retry.delayMs} ms:`,
-              describeError(error),
+          pollMs: config.pollMs,
+          isSuperseded: async () => {
+            const latest = await readQueueWindow(
+              config.queuePath,
+              config.cursorPath,
+              known,
+              config.batchSize,
             );
+            return latest.nextOffset !== requestOffset;
           },
         },
       );
+      if (outcome.status === 'superseded') {
+        await diagnostic(config, {
+          type: 'request_superseded',
+          batchId,
+          texts: requestTexts,
+          durationMs: Date.now() - requestStartedAt,
+        });
+        await logger.info(
+          `[rime-bilingual] cancelled stale batch: ${requestTexts.join(' / ')}`,
+        );
+        continue;
+      }
+      const translated = outcome.value;
       await diagnostic(config, {
         type: 'request_succeeded',
         batchId,
-        texts: window.texts,
+        texts: requestTexts,
         durationMs: Date.now() - requestStartedAt,
       });
       for (const [source, english] of translated) {
@@ -208,15 +241,15 @@ async function main(): Promise<void> {
       }
       await writeTranslationMap(config.dynamicPath, dynamic);
       await bumpVersion(config.versionPath);
-      await commitQueueOffset(config.cursorPath, window.nextOffset);
+      await commitQueueOffset(config.cursorPath, requestOffset);
       await maintainQueue(config);
       await diagnostic(config, {
         type: 'cache_written',
         batchId,
-        texts: window.texts,
+        texts: requestTexts,
         durationMs: Date.now() - detectedAt,
       });
-      await logger.info(`[rime-bilingual] cached: ${window.texts.join(' / ')}`);
+      await logger.info(`[rime-bilingual] cached: ${requestTexts.join(' / ')}`);
     } catch (error) {
       const attempts = error instanceof RetryLimitError ? error.attempts : 1;
       const cause = error instanceof RetryLimitError ? error.cause : error;
@@ -225,23 +258,23 @@ async function main(): Promise<void> {
         JSON.stringify({
           timestamp: new Date().toISOString(),
           attempts,
-          texts: window.texts,
+          texts: requestTexts,
           error: describeError(cause),
         }),
         config.logMaxBytes,
       );
-      await commitQueueOffset(config.cursorPath, window.nextOffset);
+      await commitQueueOffset(config.cursorPath, requestOffset);
       await maintainQueue(config);
       await diagnostic(config, {
         type: 'request_failed',
         batchId,
-        texts: window.texts,
+        texts: requestTexts,
         attempt: attempts,
         durationMs: Date.now() - detectedAt,
         error: describeError(cause),
       });
       await logger.error(
-        `[rime-bilingual] dropped batch after ${attempts} attempts: ${window.texts.join(' / ')}:`,
+        `[rime-bilingual] dropped batch after ${attempts} attempts: ${requestTexts.join(' / ')}:`,
         describeError(cause),
       );
     }

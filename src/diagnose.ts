@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { getConfig } from './config.js';
 import {
   eventIdentity,
+  eventsSinceLastWorkerStart,
   formatDiagnosticEvent,
   parseDiagnosticEvents,
   type DiagnosticEvent,
@@ -39,6 +40,10 @@ function printAssessment(events: DiagnosticEvent[]): void {
   console.log('\n判断：');
   if (!events.length) {
     console.log('- 尚无结构化事件；先运行 pnpm build && pnpm install:rime。');
+    return;
+  }
+  if (events.length === 1 && events[0].type === 'worker_ready') {
+    console.log('- worker 已按当前配置启动，正在等待新的未缓存候选。');
     return;
   }
   if (success?.durationMs !== undefined) {
@@ -78,12 +83,13 @@ async function printSnapshot(limit: number): Promise<DiagnosticEvent[]> {
   );
   console.log(`队列：${queue.pendingLines} 条待处理；${queue.historyLines} 条历史记录`);
   console.log(`事件文件：${config.diagnosticPath}`);
-  console.log('\n最近事件：');
-  for (const event of events.slice(-limit)) {
+  const currentSession = eventsSinceLastWorkerStart(events);
+  console.log('\n本次 worker 会话最近事件：');
+  for (const event of currentSession.slice(-limit)) {
     console.log(`- ${formatDiagnosticEvent(event)}`);
   }
-  if (!events.length) console.log('- 暂无');
-  printAssessment(events);
+  if (!currentSession.length) console.log('- 暂无');
+  printAssessment(currentSession);
   return events;
 }
 

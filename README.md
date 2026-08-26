@@ -73,6 +73,8 @@ cp .env.example .env
 
 只在本机编辑 `.env`。可以填写官方 DeepSeek 的 `DEEPSEEK_API_KEY`，也可以使用 `OPENAI_BASE_URL`、`OPENAI_API_KEY` 和 `MASTRA_CHAT_MODEL` 接入 OpenAI 兼容服务；兼容服务配置优先。不要把 key 写入 Rime 的 Lua/YAML。sidecar 会自动处理未命中的候选。
 
+OpenAI 兼容路径只要求普通 `/chat/completions`，不会发送 `response_format`；模型返回的 JSON 文本由本地 Zod 校验。因此 curl 能调用、但不支持 `json_schema`／`json_object` 的兼容接口也可以使用。
+
 AI 请求默认在初次失败后最多重试 3 次，采用 2 秒、4 秒、8 秒指数退避；仍失败的批次会写入 `failed-requests.jsonl` 并跳过，不会无限调用接口。可通过 `.env` 中的 `RIME_BILINGUAL_MAX_RETRIES` 调整，设为 `0` 表示不重试。
 
 项目随附的 85 条基础翻译位于 `rime/bilingual/seed.tsv`，是首版人工整理，并非从第三方英文词库导入。执行下面的预生成命令时，中文词按雾凇拼音 `cn_dicts/base.dict.yaml` 的权重选取，英文翻译由当前配置的模型生成。

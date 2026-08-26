@@ -101,3 +101,12 @@ export function formatDiagnosticEvent(event: DiagnosticEvent): string {
 export function eventIdentity(event: DiagnosticEvent): string {
   return `${event.timestamp}\t${event.type}\t${event.batchId ?? ''}`;
 }
+
+export function eventsSinceLastWorkerStart(
+  events: DiagnosticEvent[],
+): DiagnosticEvent[] {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    if (events[index].type === 'worker_ready') return events.slice(index);
+  }
+  return events;
+}

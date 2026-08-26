@@ -281,7 +281,9 @@ provider 选择逻辑：
   → createDeepSeek(...)(DEEPSEEK_MODEL)
 ```
 
-翻译使用 `generateText` 与 `Output.object`，并通过 Zod 约束输出：
+两个 provider 都使用 `generateText`。官方 DeepSeek 路径使用 `Output.object`；OpenAI
+兼容路径发送普通 chat completion，不携带 `response_format`，随后在本地解析 JSON
+文本。两条路径最终都通过同一份 Zod schema 约束输出：
 
 ```ts
 {
@@ -292,7 +294,9 @@ provider 选择逻辑：
 }
 ```
 
-这比解析自由文本稳定：模型必须返回每个原始中文及对应英文；worker 还会验证返回数量、过滤未知 `source`、清理换行和括号，并限制单条长度。
+兼容路径这样设计是因为部分接口能运行普通 curl，但不实现 `json_schema` 或
+`json_object`。模型仍被要求只返回 JSON；本地会剥离 Markdown code fence、解析并验证结构。
+worker 还会验证返回数量、过滤未知 `source`、清理换行和括号，并限制单条长度。
 
 当前兼容接口使用：
 
@@ -392,7 +396,7 @@ rime-bilingual-ime/
 │   └── bilingual/seed.tsv                  # 初始翻译覆盖层
 ├── src/
 │   ├── config.ts                           # 环境变量和路径
-│   ├── translator.ts                       # AI SDK + 结构化输出
+│   ├── translator.ts                       # AI SDK + 本地校验 JSON
 │   ├── worker.ts                           # 队列消费循环
 │   ├── store.ts                            # TSV、原子写、offset
 │   ├── platform.ts                         # Squirrel／Weasel 平台适配
@@ -534,7 +538,7 @@ dynamic.tsv 是否出现中文词条
 | `RIME_BILINGUAL_POLL_MS` | 250 | worker 空闲轮询周期 |
 | `RIME_BILINGUAL_DEBOUNCE_MS` | 800 | 停止输入后的防抖时间 |
 | `RIME_BILINGUAL_TIMEOUT_MS` | 兼容接口 30000 | 单次模型请求超时 |
-| `RIME_BILINGUAL_MAX_OUTPUT_TOKENS` | 兼容接口 2048 | 结构化输出预算 |
+| `RIME_BILINGUAL_MAX_OUTPUT_TOKENS` | 兼容接口 2048 | JSON 输出预算 |
 | `RIME_BILINGUAL_MAX_RETRIES` | 3 | 初次失败后的最大重试次数；0 表示不重试 |
 | `RIME_BILINGUAL_RETRY_BASE_MS` | 2000 | 指数退避的初始等待时间 |
 | `RIME_BILINGUAL_QUEUE_MAX_BYTES` | 1048576 | 已完全消费的请求队列压缩阈值 |

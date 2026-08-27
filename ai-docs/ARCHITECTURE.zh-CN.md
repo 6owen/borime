@@ -216,7 +216,7 @@ sidecar 每次成功写入 `dynamic.tsv` 后，会更新 `cache.version`。Lua �
 
 - 版本未变：继续使用内存 Map，不读取任何翻译 TSV。
 - 版本变化：只重读很小的 `seed.tsv` 与 `dynamic.tsv`。
-- `cedict.tsv`：在当前 Rime 会话保持为不可变基线，避免每批 AI 写回都同步解析约 12 万行。
+- `cedict.tsv`：在 Squirrel／Weasel 进程的共享 Lua VM 中只解析一次，并作为不可变基线供后续 Rime session 复用；切换输入法或切换应用时不会再同步重建约 12 万项的 Lua table。
 
 查找时按 `dynamic → seed → dictionary` 顺序访问三个 Map，仍然保持原有覆盖语义。基准测试中，AI 写回后的同步重载由约 94 ms 降至约 0.17 ms；网络调用本身始终位于独立 sidecar，不占用输入线程。
 

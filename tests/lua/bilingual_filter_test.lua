@@ -36,6 +36,17 @@ assert(dictionary_opens == 1, "dictionary must load once during init")
 assert(env.queue_lock_path == root .. "/bilingual/.queue-maintenance", "queue maintenance lock path must be configured")
 assert(env.ai_enabled, "the installer marker must enable AI candidate requests")
 
+local second_env = { engine = { schema = { config = config } } }
+filter.init(second_env)
+assert(
+  dictionary_opens == 1,
+  "new Rime sessions in the shared Lua VM must reuse the large dictionary"
+)
+assert(
+  second_env.dictionary_translations == env.dictionary_translations,
+  "Rime sessions must share the immutable dictionary table"
+)
+
 write("cache.version", "2\n")
 filter._reload_cache(env)
 assert(dictionary_opens == 1, "AI cache updates must not reload the large dictionary")

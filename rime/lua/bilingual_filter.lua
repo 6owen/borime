@@ -1,4 +1,6 @@
 local filter = {}
+local shared_dictionary_path = nil
+local shared_dictionary_translations = nil
 
 local function join_path(base, name)
   return base .. "/bilingual/" .. name
@@ -31,6 +33,15 @@ local function load_tsv(path)
   end
   file:close()
   return target
+end
+
+local function load_shared_dictionary(path)
+  if shared_dictionary_translations and shared_dictionary_path == path then
+    return shared_dictionary_translations
+  end
+  shared_dictionary_path = path
+  shared_dictionary_translations = load_tsv(path)
+  return shared_dictionary_translations
 end
 
 local function reload_cache(env)
@@ -167,7 +178,10 @@ function filter.init(env)
   env.semantic_comment_signature = nil
   env.semantic_comment_revision = 0
   env.version = nil
-  env.dictionary_translations = load_tsv(env.dictionary_path)
+  -- librime-lua owns one Lua VM for the process and shares it across Rime
+  -- sessions. Keep the immutable 120k-row dictionary at that same lifetime so
+  -- switching input sources does not rebuild the table on the first key.
+  env.dictionary_translations = load_shared_dictionary(env.dictionary_path)
   env.seed_translations = nil
   env.dynamic_translations = nil
   reload_cache(env)

@@ -9,6 +9,7 @@
     "test": "pnpm test:ts && pnpm test:lua",
     "test:ts": "vitest run --dir src",
     "test:lua": "luajit tests/lua/bilingual_commit_test.lua && luajit tests/lua/smart_enter_test.lua && luajit tests/lua/selection_keeper_test.lua && luajit tests/lua/bilingual_filter_test.lua && luajit tests/lua/mixed_input_test.lua",
+    "benchmark:rime-session-init": "luajit tests/lua/bilingual_filter_cold_start_test.lua",
     "worker": "tsx src/worker.ts",
     "seed": "tsx src/seed.ts",
     "import:cedict": "tsx src/import-cedict.ts",
